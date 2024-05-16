@@ -17,6 +17,7 @@ limitations under the License.
 package resourceprovider
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -253,6 +254,29 @@ var _ = Describe("Resource Metrics Provider", func() {
 			metrics.ContainerMetrics{Name: "cont1", Usage: buildResList(0, 0)},
 			metrics.ContainerMetrics{Name: "cont2", Usage: buildResList(1310.0, 0)},
 		))
+	})
+
+	It("should batch pods for queries by sets of size 500 each", func() {
+		pods := make([]*metav1.PartialObjectMetadata, 1204)
+		for i := range pods {
+			if i%3 == 0 {
+				pods[i] = &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Namespace: "some-ns", Name: fmt.Sprint(i)}}
+			} else {
+				pods[i] = &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Namespace: "other-ns", Name: fmt.Sprint(i)}}
+			}
+		}
+
+		podsByNsBatched := batchPodsByNs(pods...)
+
+		By("verifying that the pods have been grouped by namespace")
+		Expect(len(podsByNsBatched)).To(Equal(2))
+
+		By("verifying that the batches by namespace are in sets of 500")
+		Expect(podsByNsBatched["some-ns"]).To(HaveLen(1))
+		Expect(podsByNsBatched["some-ns"][0]).To(HaveLen(402))
+		Expect(podsByNsBatched["other-ns"]).To(HaveLen(2))
+		Expect(podsByNsBatched["other-ns"][0]).To(HaveLen(500))
+		Expect(podsByNsBatched["other-ns"][1]).To(HaveLen(302))
 	})
 
 	It("should be able to list metrics for nodes", func() {

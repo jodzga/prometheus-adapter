@@ -123,6 +123,7 @@ type nsQueryResults struct {
 }
 
 // GetPodMetrics implements the api.MetricsProvider interface.
+// Batches pods in high-volume namespaces to avoid excessive DFA states in queries.
 func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) ([]metrics.PodMetrics, error) {
 	resMetrics := make([]metrics.PodMetrics, 0, len(pods))
 
@@ -130,39 +131,35 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 		return resMetrics, nil
 	}
 
-	// TODO(directxman12): figure out how well this scales if we go to list 1000+ pods
-	// (and consider adding timeouts)
+	// group pods by namespace and batch them by 500 pods each
+	podsByNsBatched := batchPodsByNs(pods...)
 
-	// group pods by namespace (we could be listing for all pods in the cluster)
-	podsByNs := make(map[string][]string, len(pods))
-	for _, pod := range pods {
-		podsByNs[pod.Namespace] = append(podsByNs[pod.Namespace], pod.Name)
-	}
-
-	// actually fetch the results for each namespace
+	// actually fetch the results for each batch in each namespace
 	now := pmodel.Now()
-	resChan := make(chan nsQueryResults, len(podsByNs))
-	var wg sync.WaitGroup
-	wg.Add(len(podsByNs))
+	resChan := make(chan nsQueryResults, len(podsByNsBatched))
 
-	for ns, podNames := range podsByNs {
-		go func(ns string, podNames []string) {
-			defer wg.Done()
-			resChan <- p.queryBoth(now, podResource, ns, podNames...)
-		}(ns, podNames)
+	var wg sync.WaitGroup
+	for ns, batches := range podsByNsBatched {
+		for _, podNames := range batches {
+			wg.Add(1)
+			go func(ns string, podNames []string) {
+				defer wg.Done()
+				resChan <- p.queryBoth(now, podResource, ns, podNames...)
+			}(ns, podNames)
+		}
 	}
 
 	wg.Wait()
 	close(resChan)
 
 	// index those results in a map for easy lookup
-	resultsByNs := make(map[string]nsQueryResults, len(podsByNs))
+	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
 	for result := range resChan {
 		if result.err != nil {
 			klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping: %v", result.namespace, result.err)
 			continue
 		}
-		resultsByNs[result.namespace] = result
+		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
 	}
 
 	// convert the unorganized per-container results into results grouped
@@ -177,25 +174,75 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 	return resMetrics, nil
 }
 
+// batchPodsByNs batches pods by namespace to avoid exploding DFA states in the queries.
+// It returns a map of namespace to batches of pod names. Batch size is hardcoded to 500.
+func batchPodsByNs(pods ...*metav1.PartialObjectMetadata) map[string][][]string {
+	batchSize := 500
+	podsByNsBatched := make(map[string][][]string, len(pods))
+	for _, pod := range pods {
+		_, exists := podsByNsBatched[pod.Namespace]
+		if !exists {
+			podsByNsBatched[pod.Namespace] = [][]string{{}}
+		}
+
+		// get the last batch for this namespace
+		lastBatchIdx := len(podsByNsBatched[pod.Namespace]) - 1
+		lastBatch := podsByNsBatched[pod.Namespace][lastBatchIdx]
+		// create a new batch if the last one is full
+		if len(lastBatch) >= batchSize {
+			podsByNsBatched[pod.Namespace] = append(podsByNsBatched[pod.Namespace], []string{})
+		}
+
+		// get the current batch for this namespace and add the pod
+		currentBatchIdx := len(podsByNsBatched[pod.Namespace]) - 1
+		currentBatch := podsByNsBatched[pod.Namespace][currentBatchIdx]
+		currentBatch = append(currentBatch, pod.Name)
+
+		// wire the update back into the map
+		podsByNsBatched[pod.Namespace][currentBatchIdx] = currentBatch
+	}
+
+	return podsByNsBatched
+}
+
 // assignForPod takes the resource metrics for all containers in the given pod
 // from resultsByNs, and places them in MetricsProvider response format in resMetrics,
 // also recording the earliest time in resTime.  It will return without operating if
 // any data is missing.
-func (p *resourceProvider) assignForPod(pod *metav1.PartialObjectMetadata, resultsByNs map[string]nsQueryResults) *metrics.PodMetrics {
+func (p *resourceProvider) assignForPod(pod *metav1.PartialObjectMetadata, resultsByNs map[string][]nsQueryResults) *metrics.PodMetrics {
 	// check to make sure everything is present
 	nsRes, nsResPresent := resultsByNs[pod.Namespace]
 	if !nsResPresent {
 		klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping pod %s", pod.Namespace, pod.String())
 		return nil
 	}
-	cpuRes, hasResult := nsRes.cpu[pod.Name]
-	if !hasResult {
-		klog.Errorf("unable to fetch CPU metrics for pod %s, skipping", pod.String())
-		return nil
+
+	var cpuRes []*pmodel.Sample
+	var memRes []*pmodel.Sample
+	for _, batch := range nsRes {
+		cpuResult, cpuExists := batch.cpu[pod.Name]
+		if cpuExists {
+			cpuRes = cpuResult
+		}
+
+		memResult, memExists := batch.mem[pod.Name]
+		if memExists {
+			memRes = memResult
+		}
+
+		// cpu/mem for a given pod should be in the same batch
+		if cpuExists || memExists {
+			break
+		}
 	}
-	memRes, hasResult := nsRes.mem[pod.Name]
-	if !hasResult {
-		klog.Errorf("unable to fetch memory metrics for pod %s, skipping", pod.String())
+	// skip if any data is missing
+	if cpuRes == nil && memRes == nil {
+		if cpuRes == nil {
+			klog.Errorf("unable to fetch CPU metrics for pod %s in namespace %q, skipping", pod.String(), pod.Namespace)
+		}
+		if memRes == nil {
+			klog.Errorf("unable to fetch memory metrics for pod %s in namespace %q, skipping", pod.String(), pod.Namespace)
+		}
 		return nil
 	}
 
