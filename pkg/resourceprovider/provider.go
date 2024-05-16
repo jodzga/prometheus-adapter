@@ -178,7 +178,7 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 // It returns a map of namespace to batches of pod names. Batch size is hardcoded to 500.
 func batchPodsByNs(pods ...*metav1.PartialObjectMetadata) map[string][][]string {
 	batchSize := 500
-	podsByNsBatched := make(map[string][][]string, len(pods))
+	podsByNsBatched := map[string][][]string{}
 	for _, pod := range pods {
 		_, exists := podsByNsBatched[pod.Namespace]
 		if !exists {
@@ -236,7 +236,7 @@ func (p *resourceProvider) assignForPod(pod *metav1.PartialObjectMetadata, resul
 		}
 	}
 	// skip if any data is missing
-	if cpuRes == nil && memRes == nil {
+	if cpuRes == nil || memRes == nil {
 		if cpuRes == nil {
 			klog.Errorf("unable to fetch CPU metrics for pod %s in namespace %q, skipping", pod.String(), pod.Namespace)
 		}
