@@ -136,7 +136,12 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 
 	// actually fetch the results for each batch in each namespace
 	now := pmodel.Now()
-	resChan := make(chan nsQueryResults, len(podsByNsBatched))
+	// create a buffered channel to store all results.
+	buffSize := 0
+	for _, batches := range podsByNsBatched {
+		buffSize += len(batches)
+	}
+	resChan := make(chan nsQueryResults, buffSize)
 
 	var wg sync.WaitGroup
 	for ns, batches := range podsByNsBatched {
