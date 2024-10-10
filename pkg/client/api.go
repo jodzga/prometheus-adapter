@@ -93,7 +93,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	// codes that are 4xx are bad request errors
 	if code >= 400 && code < 500 {
 		return APIResponse{}, &Error{
-			Type: ErrBadData,
+			Type: ErrBadResponse,
 			Msg:  fmt.Sprintf("client error: %s", resp.Status),
 		}
 	}
