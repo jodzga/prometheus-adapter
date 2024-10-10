@@ -90,6 +90,22 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 
 	code := resp.StatusCode
 
+	// codes that are 4xx are bad request errors
+	if code >= 400 && code < 500 {
+		return APIResponse{}, &Error{
+			Type: ErrBadData,
+			Msg:  fmt.Sprintf("client error: %s", resp.Status),
+		}
+	}
+
+	// codes that are 5xx are bad server response errors
+	if code >= 500 && code < 600 {
+		return APIResponse{}, &Error{
+			Type: ErrBadResponse,
+			Msg:  fmt.Sprintf("server error: %s", resp.Status),
+		}
+	}
+
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
