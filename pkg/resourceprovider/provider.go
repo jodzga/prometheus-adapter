@@ -203,6 +203,7 @@ func batchPodsByNs(pods ...*metav1.PartialObjectMetadata) map[string][][]string 
 
 		// wire the update back into the map
 		podsByNsBatched[pod.Namespace][currentBatchIdx] = currentBatch
+		
 	}
 
 	return podsByNsBatched
