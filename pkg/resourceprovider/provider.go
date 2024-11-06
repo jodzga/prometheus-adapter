@@ -120,6 +120,21 @@ type nsQueryResults struct {
 	err       error
 }
 
+var (
+	queryFailureGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "namespace_query_failure",
+			Help: "Gauge indicating a failed namespace query attempt in GetPodMetrics, labeled by namespace and error message",
+		},
+		[]string{"namespace", "error"},
+	)
+)
+
+func init() {
+	// Register the metric with Prometheus.
+	prometheus.MustRegister(queryFailureGauge)
+}
+
 // GetPodMetrics implements the api.MetricsProvider interface.
 // Batches pods in high-volume namespaces to avoid excessive DFA states in queries.
 func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) ([]metrics.PodMetrics, error) {
@@ -147,7 +162,21 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 			wg.Add(1)
 			go func(ns string, podNames []string) {
 				defer wg.Done()
-				resChan <- p.queryBoth(now, podResource, ns, podNames...)
+				result := p.queryBoth(now, podResource, ns, podNames...)
+        if result.err != nil {
+          // Log the error, add to errors slice, and set gauge
+          klog.Errorf("unable to fetch metrics for pods in namespace %q: %v", ns, result.err)
+          errorLabel := result.err.Error() // Label with error message
+          queryFailureGauge.WithLabelValues(ns, errorLabel).Set(1)
+          errors = append(errors, fmt.Errorf("namespace %q: %w", ns, result.err))
+
+          // Optionally reset gauge after logging the error, treating it as an event
+          go func(ns string, errorLabel string) {
+            time.Sleep(time.Second) // Keep the gauge set briefly
+            queryFailureGauge.WithLabelValues(ns, errorLabel).Set(0)
+          }(ns, errorLabel)
+        }
+        resChan <- result
 			}(ns, podNames)
 		}
 	}
@@ -159,7 +188,6 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
 	for result := range resChan {
 		if result.err != nil {
-			klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping: %v", result.namespace, result.err)
 			continue
 		}
 		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
