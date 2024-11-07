@@ -39,6 +39,10 @@ import (
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 
 	pmodel "github.com/prometheus/common/model"
+
+	"github.com/prometheus/client_golang/prometheus"
+  "github.com/prometheus/client_golang/prometheus/collectors"
+  "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -131,6 +135,23 @@ var (
 )
 
 func init() {
+  metricsListenAddr:= "8080"
+  mux := http.NewServeMux()
+	go func() {
+		klog.Infof("[http] listening on %s", metricsListenAddr)
+		err := http.ListenAndServe(metricsListenAddr, mux)
+		if err != nil {
+			klog.Warningf("[http] error serving http: %+v", err)
+		}
+	}()
+
+	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
+    prometheus.DefaultRegisterer,
+    promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+      ErrorHandling: promhttp.PanicOnError,
+    }),
+  ))
+
 	// Register the metric with Prometheus.
 	prometheus.MustRegister(queryFailureCounter)
 }

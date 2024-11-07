@@ -46,6 +46,9 @@ spec:
         ports:
         - containerPort: 6443
           name: https
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
         readinessProbe:
           failureThreshold: 5
           httpGet:
