@@ -121,10 +121,10 @@ type nsQueryResults struct {
 }
 
 var (
-	queryFailureGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "namespace_query_failure",
-			Help: "Gauge indicating a failed namespace query attempt in GetPodMetrics, labeled by namespace and error message",
+	queryFailureCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "namespace_query_failure_total",
+			Help: "Total number of failed namespace query attempts in GetPodMetrics, labeled by namespace and error message",
 		},
 		[]string{"namespace", "error"},
 	)
@@ -132,7 +132,7 @@ var (
 
 func init() {
 	// Register the metric with Prometheus.
-	prometheus.MustRegister(queryFailureGauge)
+	prometheus.MustRegister(queryFailureCounter)
 }
 
 // GetPodMetrics implements the api.MetricsProvider interface.
@@ -158,40 +158,32 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 
 	var wg sync.WaitGroup
 	for ns, batches := range podsByNsBatched {
-		for _, podNames := range batches {
-			wg.Add(1)
-			go func(ns string, podNames []string) {
-				defer wg.Done()
-				result := p.queryBoth(now, podResource, ns, podNames...)
-        if result.err != nil {
-          // Log the error, add to errors slice, and set gauge
-          klog.Errorf("unable to fetch metrics for pods in namespace %q: %v", ns, result.err)
-          errorLabel := result.err.Error() // Label with error message
-          queryFailureGauge.WithLabelValues(ns, errorLabel).Set(1)
-          errors = append(errors, fmt.Errorf("namespace %q: %w", ns, result.err))
+  		for _, podNames := range batches {
+  			wg.Add(1)
+  			go func(ns string, podNames []string) {
+  				defer wg.Done()
+  				resChan <- p.queryBoth(now, podResource, ns, podNames...)
+  			}(ns, podNames)
+  		}
+  	}
 
-          // Optionally reset gauge after logging the error, treating it as an event
-          go func(ns string, errorLabel string) {
-            time.Sleep(time.Second) // Keep the gauge set briefly
-            queryFailureGauge.WithLabelValues(ns, errorLabel).Set(0)
-          }(ns, errorLabel)
-        }
-        resChan <- result
-			}(ns, podNames)
-		}
-	}
+  	wg.Wait()
+  	close(resChan)
 
-	wg.Wait()
-	close(resChan)
+  	// index those results in a map for easy lookup
+  	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
+  	for result := range resChan {
+  		if result.err != nil {
+  			// Log the error, increment the counter, and continue
+  			klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping: %v", result.namespace, result.err)
 
-	// index those results in a map for easy lookup
-	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
-	for result := range resChan {
-		if result.err != nil {
-			continue
-		}
-		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
-	}
+  			// Increment the counter with namespace and error as labels
+  			queryFailureCounter.WithLabelValues(result.namespace, result.err.Error()).Inc()
+
+  			continue
+  		}
+  		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
+  	}
 
 	// convert the unorganized per-container results into results grouped
 	// together by namespace, pod, and container
