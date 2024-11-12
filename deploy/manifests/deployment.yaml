@@ -7,6 +7,9 @@ metadata:
     app.kubernetes.io/version: 0.12.0
   name: prometheus-adapter
   namespace: monitoring
+  annotations:
+    prometheus_io_port: '6002'
+    prometheus_io_scrape: 'true'
 spec:
   replicas: 2
   selector:

@@ -18,6 +18,7 @@ package resourceprovider
 
 import (
 	"context"
+	"net/http"
 	"fmt"
 	"math"
 	"sync"
@@ -41,7 +42,6 @@ import (
 	pmodel "github.com/prometheus/common/model"
 
 	"github.com/prometheus/client_golang/prometheus"
-  "github.com/prometheus/client_golang/prometheus/collectors"
   "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
