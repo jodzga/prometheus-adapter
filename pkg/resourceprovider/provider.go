@@ -18,6 +18,7 @@ package resourceprovider
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"fmt"
 	"math"
@@ -135,15 +136,7 @@ var (
 )
 
 func init() {
-  metricsListenAddr:= "8080"
   mux := http.NewServeMux()
-	go func() {
-		klog.Infof("[http] listening on %s", metricsListenAddr)
-		err := http.ListenAndServe(metricsListenAddr, mux)
-		if err != nil {
-			klog.Warningf("[http] error serving http: %+v", err)
-		}
-	}()
 
 	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
     prometheus.DefaultRegisterer,
@@ -154,6 +147,21 @@ func init() {
 
 	// Register the metric with Prometheus.
 	prometheus.MustRegister(queryFailureCounter)
+
+	// Create the listener manually
+      listener, err := net.Listen("tcp", ":8080")
+      if err != nil {
+          klog.Fatalf("[http] Failed to create listener: %+v", err)
+      }
+      klog.Infof("[http] listening on %s", listener.Addr())
+
+      // Start serving using the listener
+      go func() {
+          err := http.Serve(listener, mux)
+          if err != nil {
+              klog.Warningf("[http] error serving http: %+v", err)
+          }
+      }()
 }
 
 // GetPodMetrics implements the api.MetricsProvider interface.
