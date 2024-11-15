@@ -18,10 +18,10 @@ package resourceprovider
 
 import (
 	"context"
-	"net"
-	"net/http"
 	"fmt"
 	"math"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -43,7 +43,7 @@ import (
 	pmodel "github.com/prometheus/common/model"
 
 	"github.com/prometheus/client_golang/prometheus"
-  "github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -136,32 +136,32 @@ var (
 )
 
 func init() {
-  mux := http.NewServeMux()
+	mux := http.NewServeMux()
 
 	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
-    prometheus.DefaultRegisterer,
-    promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
-      ErrorHandling: promhttp.PanicOnError,
-    }),
-  ))
+		prometheus.DefaultRegisterer,
+		promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+			ErrorHandling: promhttp.PanicOnError,
+		}),
+	))
 
 	// Register the metric with Prometheus.
 	prometheus.MustRegister(queryFailureCounter)
 
 	// Create the listener manually
-      listener, err := net.Listen("tcp", ":8080")
-      if err != nil {
-          klog.Fatalf("[http] Failed to create listener: %+v", err)
-      }
-      klog.Infof("[http] listening on %s", listener.Addr())
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		klog.Fatalf("[http] Failed to create listener: %+v", err)
+	}
+	klog.Infof("[http] listening on %s", listener.Addr())
 
-      // Start serving using the listener
-      go func() {
-          err := http.Serve(listener, mux)
-          if err != nil {
-              klog.Warningf("[http] error serving http: %+v", err)
-          }
-      }()
+	// Start serving using the listener
+	go func() {
+		err := http.Serve(listener, mux)
+		if err != nil {
+			klog.Warningf("[http] error serving http: %+v", err)
+		}
+	}()
 }
 
 // GetPodMetrics implements the api.MetricsProvider interface.
@@ -187,32 +187,34 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 
 	var wg sync.WaitGroup
 	for ns, batches := range podsByNsBatched {
-  		for _, podNames := range batches {
-  			wg.Add(1)
-  			go func(ns string, podNames []string) {
-  				defer wg.Done()
-  				resChan <- p.queryBoth(now, podResource, ns, podNames...)
-  			}(ns, podNames)
-  		}
-  	}
+		for _, podNames := range batches {
+			wg.Add(1)
+			go func(ns string, podNames []string) {
+				defer wg.Done()
 
-  	wg.Wait()
-  	close(resChan)
+				resChan <- p.queryBoth(now, podResource, ns, podNames...)
 
-  	// index those results in a map for easy lookup
-  	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
-  	for result := range resChan {
-  		if result.err != nil {
-  			// Log the error, increment the counter, and continue
-  			klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping: %v", result.namespace, result.err)
+			}(ns, podNames)
+		}
+	}
 
-  			// Increment the counter with namespace and error as labels
-  			queryFailureCounter.WithLabelValues(result.namespace, result.err.Error()).Inc()
+	wg.Wait()
+	close(resChan)
 
-  			continue
-  		}
-  		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
-  	}
+	// index those results in a map for easy lookup
+	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
+	for result := range resChan {
+		if result.err != nil {
+			// Log the error, increment the counter, and continue
+			klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping: %v", result.namespace, result.err)
+
+			// Increment the counter with namespace and error as labels
+			queryFailureCounter.WithLabelValues(result.namespace, result.err.Error()).Inc()
+
+			continue
+		}
+		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
+	}
 
 	// convert the unorganized per-container results into results grouped
 	// together by namespace, pod, and container
