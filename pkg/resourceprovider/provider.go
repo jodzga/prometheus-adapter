@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"regexp"
 
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -41,7 +42,6 @@ import (
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 
 	pmodel "github.com/prometheus/common/model"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -126,13 +126,20 @@ type nsQueryResults struct {
 }
 
 var (
-	queryFailureCounter = prometheus.NewCounterVec(
+	podQueryFailureCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "namespace_query_failure_total",
-			Help: "Total number of failed namespace query attempts in GetPodMetrics, labeled by namespace and error message",
+			Help: "Total number of failed namespace query attempts in GetPodMetrics, labeled by namespace and status code",
 		},
-		[]string{"namespace", "error"},
+		[]string{"namespace", "statusCode"},
 	)
+  nodeQueryFailureCounter = prometheus.NewCounterVec(
+  		prometheus.CounterOpts{
+  			Name: "node_query_failure_total",
+  			Help: "Total number of failed node query attempts in GetNodeMetrics, labeled by status code",
+  		},
+  		[]string{"statusCode"},
+  	)
 )
 
 func init() {
@@ -146,22 +153,38 @@ func init() {
 	))
 
 	// Register the metric with Prometheus.
-	prometheus.MustRegister(queryFailureCounter)
+	prometheus.MustRegister(podQueryFailureCounter)
+	prometheus.MustRegister(nodeQueryFailureCounter)
 
-	// Create the listener manually
-	listener, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		klog.Fatalf("[http] Failed to create listener: %+v", err)
-	}
-	klog.Infof("[http] listening on %s", listener.Addr())
+	// Check if a listener is already active on port 8080
+  port := ":8080"
+  addr, err := net.ResolveTCPAddr("tcp", port)
+  if err != nil {
+    klog.Fatalf("[http] Failed to resolve address for prom-adapter on port 8080, error: %+v", err)
+  }
 
-	// Start serving using the listener
-	go func() {
-		err := http.Serve(listener, mux)
-		if err != nil {
-			klog.Warningf("[http] error serving http: %+v", err)
-		}
-	}()
+  conn, err := net.Dial("tcp", addr.String())
+  if err == nil {
+    // A listener is already active; connect to it
+    klog.Infof("[http] Found an active listener from prom-adapter on port %s, reusing the connection.", port)
+    conn.Close() // Close the test connection
+    return
+  }
+
+  // If no listener is active, create one
+  listener, err := net.Listen("tcp", port)
+  if err != nil {
+    klog.Fatalf("[http] Failed to create listener for prom-adapter on port %s, error: %+v", port, err)
+  }
+  klog.Infof("[http] prom-adapter /metrics port listening on %s", listener.Addr())
+
+  // Start serving using the listener
+  go func() {
+    err := http.Serve(listener, mux)
+    if err != nil {
+      klog.Warningf("[http] prom-adapter /metrics port error serving http: %+v", err)
+    }
+  }()
 }
 
 // GetPodMetrics implements the api.MetricsProvider interface.
@@ -191,9 +214,7 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 			wg.Add(1)
 			go func(ns string, podNames []string) {
 				defer wg.Done()
-
 				resChan <- p.queryBoth(now, podResource, ns, podNames...)
-
 			}(ns, podNames)
 		}
 	}
@@ -203,14 +224,16 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 
 	// index those results in a map for easy lookup
 	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
+	re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	for result := range resChan {
 		if result.err != nil {
-			// Log the error, increment the counter, and continue
-			klog.Errorf("unable to fetch metrics for pods in namespace %q, skipping: %v", result.namespace, result.err)
-
-			// Increment the counter with namespace and error as labels
-			queryFailureCounter.WithLabelValues(result.namespace, result.err.Error()).Inc()
-
+			klog.Errorf("prom-adapter unable to fetch metrics for pods in namespace %q, error: %+v", result.namespace, result.err)
+      matches := re.FindStringSubmatch(result.err.Error())
+      statusCode := "unknown"
+      if len(matches) > 1 {
+        statusCode = matches[1] // The captured status code
+      }
+			podQueryFailureCounter.WithLabelValues(result.namespace, statusCode).Inc()
 			continue
 		}
 		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
@@ -378,11 +401,17 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 	for _, node := range nodes {
 		nodeNames = append(nodeNames, node.Name)
 	}
-
+  re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	// run the actual query
 	qRes := p.queryBoth(now, nodeResource, "", nodeNames...)
 	if qRes.err != nil {
 		klog.Errorf("failed querying node metrics: %v", qRes.err)
+		matches := re.FindStringSubmatch(qRes.err.Error())
+    statusCode := "unknown"
+    if len(matches) > 1 {
+      statusCode = matches[1] // The captured status code
+    }
+		nodeQueryFailureCounter.WithLabelValues(statusCode).Inc()
 		return resMetrics, nil
 	}
 
