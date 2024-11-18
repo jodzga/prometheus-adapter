@@ -112,9 +112,10 @@ func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, name
 	}
 	// Here is where we're making the query, need to be before here xD
 	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), selector)
+
   re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	if err != nil {
-		klog.Errorf("prom-adapter unable to fetch metrics from prometheus: %v", err)
+		klog.Errorf("unable to fetch metrics from prometheus: %v", err)
     matches := re.FindStringSubmatch(err.Error())
     statusCode := "unknown"
     if len(matches) > 1 {

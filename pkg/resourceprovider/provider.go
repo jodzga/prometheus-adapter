@@ -401,6 +401,7 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 	for _, node := range nodes {
 		nodeNames = append(nodeNames, node.Name)
 	}
+
   re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	// run the actual query
 	qRes := p.queryBoth(now, nodeResource, "", nodeNames...)

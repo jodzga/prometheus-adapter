@@ -207,7 +207,7 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), query)
 	re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	if err != nil {
-		klog.Errorf("prom-adapter unable to fetch metrics from prometheus: %v", err)
+		klog.Errorf("unable to fetch metrics from prometheus: %v", err)
 		matches := re.FindStringSubmatch(err.Error())
     statusCode := "unknown"
     if len(matches) > 1 {

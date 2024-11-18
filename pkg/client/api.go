@@ -54,12 +54,10 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	u := *c.baseURL
 	u.Path = path.Join(c.baseURL.Path, endpoint)
 	var reqBody io.Reader
-	var reqBodyStr string // To store the stringified body for logging
 	if verb == http.MethodGet {
 		u.RawQuery = query.Encode()
 	} else if verb == http.MethodPost {
-		reqBodyStr = query.Encode()
-    reqBody = strings.NewReader(reqBodyStr)
+    reqBody = strings.NewReader(query.Encode())
 	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
@@ -86,13 +84,14 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
       Type: ErrBadResponse,
       Msg: fmt.Sprintf("HTTP request failed [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Error: %v]",
-        req.Method, req.URL, req.Header, reqBodyStr, err),
+        req.Method, req.URL, req.Header, query.Encode(), err),
     }
 	}
 
 	if klog.V(6).Enabled() {
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
 	}
+
   // Read and decode the response body for logging
   var respBodyStr string
   if resp != nil {
@@ -112,7 +111,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
       Type: ErrBadResponse,
       Msg: fmt.Sprintf("Unexpected HTTP response [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Status Code: %d] [Response Headers: %+v] [Response Body: %s]",
-        req.Method, req.URL, req.Header, reqBodyStr,
+        req.Method, req.URL, req.Header, query.Encode(),
         resp.StatusCode, resp.Header, respBodyStr),
     }
 	}
@@ -132,7 +131,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
       Type: ErrBadResponse,
       Msg: fmt.Sprintf("Unable to decode JSON response [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Status Code: %d] [Response Headers: %+v] [Response Body: %s] [Error: %v]",
-        req.Method, req.URL, req.Header, reqBodyStr,
+        req.Method, req.URL, req.Header, query.Encode(),
         resp.StatusCode, resp.Header, respBodyStr, err),
     }
 	}
@@ -141,7 +140,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return res, &Error{
       Type: res.ErrorType,
       Msg: fmt.Sprintf("Response error received [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Status Code: %d] [Response Headers: %+v] [Response Body: %s] [Result: %+v]",
-        req.Method, req.URL, req.Header, reqBodyStr,
+        req.Method, req.URL, req.Header, query.Encode(),
         resp.StatusCode, resp.Header, respBodyStr, res),
     }
 	}
