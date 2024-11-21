@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -51,6 +52,9 @@ import (
 	extprov "sigs.k8s.io/prometheus-adapter/pkg/external-provider"
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 	resprov "sigs.k8s.io/prometheus-adapter/pkg/resourceprovider"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type PrometheusAdapter struct {
@@ -295,6 +299,50 @@ func (cmd *PrometheusAdapter) addResourceMetricsAPI(promClient prom.Client, stop
 	return nil
 }
 
+func setupMetricsPort() {
+	mux := http.NewServeMux()
+
+	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
+		prometheus.DefaultRegisterer,
+		promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+			ErrorHandling: promhttp.PanicOnError,
+		}),
+	))
+
+	// Register the metric with Prometheus.
+	mprom.RegisterMetrics()
+
+	// Check if a listener is already active on port 8080
+	port := ":8080"
+	addr, err := net.ResolveTCPAddr("tcp", port)
+	if err != nil {
+		klog.Fatalf("[http] Failed to resolve address for prom-adapter on port 8080, error: %+v", err)
+	}
+
+	conn, err := net.Dial("tcp", addr.String())
+	if err == nil {
+		// A listener is already active; connect to it
+		klog.Infof("[http] Found an active listener from prom-adapter on port %s, reusing the connection.", port)
+		conn.Close() // Close the test connection
+		return
+	}
+
+	// If no listener is active, create one
+	listener, err := net.Listen("tcp", port)
+	if err != nil {
+		klog.Fatalf("[http] Failed to create listener for prom-adapter on port %s, error: %+v", port, err)
+	}
+	klog.Infof("[http] prom-adapter /metrics port listening on %s", listener.Addr())
+
+	// Start serving using the listener
+	go func() {
+		err := http.Serve(listener, mux)
+		if err != nil {
+			klog.Warningf("[http] prom-adapter /metrics port error serving http: %+v", err)
+		}
+	}()
+}
+
 func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
@@ -342,6 +390,8 @@ func main() {
 
 	// stop channel closed on SIGTERM and SIGINT
 	stopCh := genericapiserver.SetupSignalHandler()
+
+	setupMetricsPort()
 
 	// construct the provider
 	cmProvider, err := cmd.makeProvider(promClient, stopCh)

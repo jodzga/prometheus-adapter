@@ -20,11 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net"
-	"net/http"
 	"sync"
 	"time"
-	"regexp"
 
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -34,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/klog/v2"
 	metrics "k8s.io/metrics/pkg/apis/metrics"
+	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
+
 
 	"sigs.k8s.io/metrics-server/pkg/api"
 
@@ -42,8 +41,6 @@ import (
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 
 	pmodel "github.com/prometheus/common/model"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -125,68 +122,6 @@ type nsQueryResults struct {
 	err       error
 }
 
-var (
-	podQueryFailureCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "namespace_query_failure_total",
-			Help: "Total number of failed namespace query attempts in GetPodMetrics, labeled by namespace and status code",
-		},
-		[]string{"namespace", "statusCode"},
-	)
-  nodeQueryFailureCounter = prometheus.NewCounterVec(
-  		prometheus.CounterOpts{
-  			Name: "node_query_failure_total",
-  			Help: "Total number of failed node query attempts in GetNodeMetrics, labeled by status code",
-  		},
-  		[]string{"statusCode"},
-  	)
-)
-
-func init() {
-	mux := http.NewServeMux()
-
-	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
-		prometheus.DefaultRegisterer,
-		promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
-			ErrorHandling: promhttp.PanicOnError,
-		}),
-	))
-
-	// Register the metric with Prometheus.
-	prometheus.MustRegister(podQueryFailureCounter)
-	prometheus.MustRegister(nodeQueryFailureCounter)
-
-	// Check if a listener is already active on port 8080
-  port := ":8080"
-  addr, err := net.ResolveTCPAddr("tcp", port)
-  if err != nil {
-    klog.Fatalf("[http] Failed to resolve address for prom-adapter on port 8080, error: %+v", err)
-  }
-
-  conn, err := net.Dial("tcp", addr.String())
-  if err == nil {
-    // A listener is already active; connect to it
-    klog.Infof("[http] Found an active listener from prom-adapter on port %s, reusing the connection.", port)
-    conn.Close() // Close the test connection
-    return
-  }
-
-  // If no listener is active, create one
-  listener, err := net.Listen("tcp", port)
-  if err != nil {
-    klog.Fatalf("[http] Failed to create listener for prom-adapter on port %s, error: %+v", port, err)
-  }
-  klog.Infof("[http] prom-adapter /metrics port listening on %s", listener.Addr())
-
-  // Start serving using the listener
-  go func() {
-    err := http.Serve(listener, mux)
-    if err != nil {
-      klog.Warningf("[http] prom-adapter /metrics port error serving http: %+v", err)
-    }
-  }()
-}
-
 // GetPodMetrics implements the api.MetricsProvider interface.
 // Batches pods in high-volume namespaces to avoid excessive DFA states in queries.
 func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) ([]metrics.PodMetrics, error) {
@@ -224,16 +159,16 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 
 	// index those results in a map for easy lookup
 	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
-	re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	for result := range resChan {
 		if result.err != nil {
-			klog.Errorf("prom-adapter unable to fetch metrics for pods in namespace %q, error: %+v", result.namespace, result.err)
-      matches := re.FindStringSubmatch(result.err.Error())
-      statusCode := "unknown"
-      if len(matches) > 1 {
-        statusCode = matches[1] // The captured status code
-      }
-			podQueryFailureCounter.WithLabelValues(result.namespace, statusCode).Inc()
+			if promErr, ok := result.err.(*client.Error); ok {
+				klog.Errorf("prom-adapter unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, promErr.Error())
+				mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, fmt.Sprintf("%d", promErr.StatusCode)).Inc()
+			} else {
+				// Generic error handling for other types of errors
+				klog.Errorf("prom-adapter unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, result.err.Error())
+				mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, "unknown").Inc()
+			}
 			continue
 		}
 		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
@@ -402,17 +337,18 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-  re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	// run the actual query
 	qRes := p.queryBoth(now, nodeResource, "", nodeNames...)
 	if qRes.err != nil {
-		klog.Errorf("failed querying node metrics: %v", qRes.err)
-		matches := re.FindStringSubmatch(qRes.err.Error())
-    statusCode := "unknown"
-    if len(matches) > 1 {
-      statusCode = matches[1] // The captured status code
-    }
-		nodeQueryFailureCounter.WithLabelValues(statusCode).Inc()
+		if promErr, ok := qRes.err.(*client.Error); ok {
+			klog.Errorf("failed querying node metrics: %s", promErr.Error())
+			mprom.NodeQueryFailureCounter.WithLabelValues(fmt.Sprintf("%d", promErr.StatusCode)).Inc()
+		} else {
+			// Generic error handling for other types of errors
+			klog.Errorf("failed querying node metrics: %s", qRes.err.Error())
+			mprom.NodeQueryFailureCounter.WithLabelValues("unknown").Inc()
+		}
+		klog.Errorf("failed querying node metrics: %s", qRes.err.Error())
 		return resMetrics, nil
 	}
 
@@ -479,15 +415,41 @@ func (p *resourceProvider) queryBoth(now pmodel.Time, resource schema.GroupResou
 	wg.Wait()
 
 	if cpuErr != nil {
-		return nsQueryResults{
-			namespace: namespace,
-			err:       fmt.Errorf("unable to fetch node CPU metrics: %v", cpuErr),
+		if promErr, ok := cpuErr.(*client.Error); ok {
+			return nsQueryResults{
+				namespace: namespace,
+				err:      &client.Error{
+					Type: promErr.Type,
+					ErrorMsg:  fmt.Sprintf("unable to fetch node CPU metrics: %s", promErr.ErrorMsg),
+					Query: promErr.Query,
+					StatusCode: promErr.StatusCode,
+				},
+			}
+		} else {
+			// Generic error handling for other types of errors
+			return nsQueryResults{
+				namespace: namespace,
+				err:       fmt.Errorf("unable to fetch node CPU metrics: %v", cpuErr),
+			}
 		}
 	}
 	if memErr != nil {
-		return nsQueryResults{
-			namespace: namespace,
-			err:       fmt.Errorf("unable to fetch node memory metrics: %v", memErr),
+		if promErr, ok := cpuErr.(*client.Error); ok {
+			return nsQueryResults{
+				namespace: namespace,
+				err:      &client.Error{
+					Type: promErr.Type,
+					ErrorMsg:  fmt.Sprintf("unable to fetch node memory metrics: %s", promErr.ErrorMsg),
+					Query: promErr.Query,
+					StatusCode: promErr.StatusCode,
+				},
+			}
+		} else {
+			// Generic error handling for other types of errors
+			return nsQueryResults{
+				namespace: namespace,
+				err:       fmt.Errorf("unable to fetch node memory metrics: %v", cpuErr),
+			}
 		}
 	}
 
@@ -521,7 +483,7 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 	// run the query
 	rawRes, err := p.prom.Query(context.Background(), now, query)
 	if err != nil {
-		return nil, fmt.Errorf("unable to execute query: %v", err)
+		return nil, err
 	}
 
 	if rawRes.Type != pmodel.ValVector || rawRes.Vector == nil {

@@ -57,7 +57,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if verb == http.MethodGet {
 		u.RawQuery = query.Encode()
 	} else if verb == http.MethodPost {
-    reqBody = strings.NewReader(query.Encode())
+    	reqBody = strings.NewReader(query.Encode())
 	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
@@ -82,10 +82,11 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 
 	if err != nil {
 		return APIResponse{}, &Error{
-      Type: ErrBadResponse,
-      Msg: fmt.Sprintf("HTTP request failed [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Error: %v]",
-        req.Method, req.URL, req.Header, query.Encode(), err),
-    }
+		  	Type: ErrBadResponse,
+		  	ErrorMsg:  err.Error(),
+			Query: query.Encode(),
+			StatusCode: 0,
+		}
 	}
 
 	if klog.V(6).Enabled() {
@@ -109,11 +110,11 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
-      Type: ErrBadResponse,
-      Msg: fmt.Sprintf("Unexpected HTTP response [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Status Code: %d] [Response Headers: %+v] [Response Body: %s]",
-        req.Method, req.URL, req.Header, query.Encode(),
-        resp.StatusCode, resp.Header, respBodyStr),
-    }
+		  	Type: ErrBadResponse,
+		  	ErrorMsg: respBodyStr,
+			StatusCode: resp.StatusCode,
+			Query: query.Encode(),
+		}
 	}
 
 	var body io.Reader = resp.Body
@@ -129,20 +130,20 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	var res APIResponse
 	if err = json.NewDecoder(body).Decode(&res); err != nil {
 		return APIResponse{}, &Error{
-      Type: ErrBadResponse,
-      Msg: fmt.Sprintf("Unable to decode JSON response [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Status Code: %d] [Response Headers: %+v] [Response Body: %s] [Error: %v]",
-        req.Method, req.URL, req.Header, query.Encode(),
-        resp.StatusCode, resp.Header, respBodyStr, err),
-    }
+		  	Type: ErrBadResponse,
+		  	ErrorMsg:  err.Error(),
+			StatusCode: resp.StatusCode,
+			Query: query.Encode(),
+		}
 	}
 
 	if res.Status == ResponseError {
 		return res, &Error{
-      Type: res.ErrorType,
-      Msg: fmt.Sprintf("Response error received [Method: %s] [URL: %s] [Headers: %+v] [Body: %s] [Status Code: %d] [Response Headers: %+v] [Response Body: %s] [Result: %+v]",
-        req.Method, req.URL, req.Header, query.Encode(),
-        resp.StatusCode, resp.Header, respBodyStr, res),
-    }
+			Type: ErrBadResponse,
+			ErrorMsg:  respBodyStr,
+			StatusCode: resp.StatusCode,
+			Query: query.Encode(),
+		}
 	}
 
 	return res, nil

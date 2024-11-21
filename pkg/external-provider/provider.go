@@ -17,9 +17,6 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"net"
-  "net/http"
-  "regexp"
 
 	pmodel "github.com/prometheus/common/model"
 
@@ -33,8 +30,7 @@ import (
 
 	prom "sigs.k8s.io/prometheus-adapter/pkg/client"
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
-	"github.com/prometheus/client_golang/prometheus"
-  "github.com/prometheus/client_golang/prometheus/promhttp"
+	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
 )
 
 type externalPrometheusProvider struct {
@@ -43,61 +39,6 @@ type externalPrometheusProvider struct {
 
 	seriesRegistry ExternalSeriesRegistry
 }
-
-var (
-	externalMetricsFailureCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "external_metrics_query_failure_total",
-			Help: "Total number of failed external metrics query attempts",
-		},
-		[]string{"statusCode"},
-	)
-)
-
-func init() {
-	mux := http.NewServeMux()
-
-	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
-		prometheus.DefaultRegisterer,
-		promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
-			ErrorHandling: promhttp.PanicOnError,
-		}),
-	))
-
-	// Register the metric with Prometheus.
-	prometheus.MustRegister(externalMetricsFailureCounter)
-
-	// Check if a listener is already active on port 8080
-  port := ":8080"
-  addr, err := net.ResolveTCPAddr("tcp", port)
-  if err != nil {
-    klog.Fatalf("[http] Failed to resolve address for prom-adapter on port 8080, error: %+v", err)
-  }
-
-  conn, err := net.Dial("tcp", addr.String())
-  if err == nil {
-    // A listener is already active; connect to it
-    klog.Infof("[http] Found an active listener from prom-adapter on port %s, reusing the connection.", port)
-    conn.Close() // Close the test connection
-    return
-  }
-
-  // If no listener is active, create one
-  listener, err := net.Listen("tcp", port)
-  if err != nil {
-    klog.Fatalf("[http] Failed to create listener for prom-adapter on port %s, error: %+v", port, err)
-  }
-  klog.Infof("[http] prom-adapter /metrics port listening on %s", listener.Addr())
-
-  // Start serving using the listener
-  go func() {
-    err := http.Serve(listener, mux)
-    if err != nil {
-      klog.Warningf("[http] prom-adapter /metrics port error serving http: %+v", err)
-    }
-  }()
-}
-
 
 func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, namespace string, metricSelector labels.Selector, info provider.ExternalMetricInfo) (*external_metrics.ExternalMetricValueList, error) {
 	selector, found, err := p.seriesRegistry.QueryForMetric(namespace, info.Metric, metricSelector)
@@ -113,15 +54,15 @@ func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, name
 	// Here is where we're making the query, need to be before here xD
 	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), selector)
 
-  re := regexp.MustCompile(`\[Status Code: (\d{3})\]`)
 	if err != nil {
-		klog.Errorf("unable to fetch metrics from prometheus: %v", err)
-    matches := re.FindStringSubmatch(err.Error())
-    statusCode := "unknown"
-    if len(matches) > 1 {
-      statusCode = matches[1] // The captured status code
-    }
-		externalMetricsFailureCounter.WithLabelValues(statusCode).Inc()
+		if promErr, ok := err.(*prom.Error); ok { // Check if the error is of type *prom.Error
+			klog.Errorf("unable to fetch metrics from prometheus: %s", err.Error())
+			mprom.ExternalMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", promErr.StatusCode)).Inc()
+		} else {
+			// Generic error handling for other types of errors
+			klog.Errorf("unexpected error fetching metrics from prometheus: %s", err.Error())
+			mprom.ExternalMetricsFailureCounter.WithLabelValues("unknown").Inc()
+		}
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}

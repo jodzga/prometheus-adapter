@@ -45,7 +45,46 @@ var (
 		},
 		[]string{"path", "server"},
 	)
+
+	ExternalMetricsFailureCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "external_metrics_query_failure_total",
+			Help: "Total number of failed external metrics query attempts",
+		},
+		[]string{"statusCode"},
+	)
+
+	PodQueryFailureCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "namespace_query_failure_total",
+			Help: "Total number of failed namespace query attempts in GetPodMetrics, labeled by namespace and status code",
+		},
+		[]string{"namespace", "statusCode"},
+	)
+
+	NodeQueryFailureCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "node_query_failure_total",
+			Help: "Total number of failed node query attempts in GetNodeMetrics, labeled by status code",
+		},
+		[]string{"statusCode"},
+	)
+
+	CustomMetricsFailureCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "custom_metrics_query_failure_total",
+			Help: "Total number of failed custom metrics query attempts",
+		},
+		[]string{"statusCode"},
+	)
 )
+
+func RegisterMetrics() {
+	prometheus.MustRegister(ExternalMetricsFailureCounter)
+	prometheus.MustRegister(PodQueryFailureCounter)
+	prometheus.MustRegister(NodeQueryFailureCounter)
+	prometheus.MustRegister(CustomMetricsFailureCounter)
+}
 
 func MetricsHandler() (http.HandlerFunc, error) {
 	registry := metrics.NewKubeRegistry()
