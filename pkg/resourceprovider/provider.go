@@ -33,7 +33,6 @@ import (
 	metrics "k8s.io/metrics/pkg/apis/metrics"
 	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
 
-
 	"sigs.k8s.io/metrics-server/pkg/api"
 
 	"sigs.k8s.io/prometheus-adapter/pkg/client"
@@ -348,7 +347,6 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 			klog.Errorf("failed querying node metrics: %s", qRes.err.Error())
 			mprom.NodeQueryFailureCounter.WithLabelValues("unknown").Inc()
 		}
-		klog.Errorf("failed querying node metrics: %s", qRes.err.Error())
 		return resMetrics, nil
 	}
 

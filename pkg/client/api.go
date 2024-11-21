@@ -57,7 +57,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if verb == http.MethodGet {
 		u.RawQuery = query.Encode()
 	} else if verb == http.MethodPost {
-    	reqBody = strings.NewReader(query.Encode())
+		reqBody = strings.NewReader(query.Encode())
 	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
@@ -93,18 +93,18 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
 	}
 
-  // Read and decode the response body for logging
-  var respBodyStr string
-  if resp != nil {
-    respBodyBytes, readErr := io.ReadAll(resp.Body)
-    if readErr != nil {
-      respBodyStr = fmt.Sprintf("unable to read response body: %v", readErr)
-    } else {
-      respBodyStr = string(respBodyBytes)
-      // Recreate the response body for further use
-      resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
-    }
-  }
+	// Read and decode the response body for logging
+	var respBodyStr string
+	if resp != nil {
+		respBodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+		  respBodyStr = fmt.Sprintf("unable to read response body: %v", readErr)
+		} else {
+		  respBodyStr = string(respBodyBytes)
+		  // Recreate the response body for further use
+		  resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+		}
+	}
 	code := resp.StatusCode
 
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
