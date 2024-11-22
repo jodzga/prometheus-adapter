@@ -153,7 +153,7 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 		} else {
 			// Generic error handling for other types of errors
 			klog.Errorf("unexpected error fetching metrics from prometheus: %s", err.Error())
-			mprom.ExternalMetricsFailureCounter.WithLabelValues("unknown").Inc()
+			mprom.CustomMetricsFailureCounter.WithLabelValues("unknown").Inc()
 		}
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))

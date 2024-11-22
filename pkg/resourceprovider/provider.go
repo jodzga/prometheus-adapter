@@ -161,11 +161,11 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 	for result := range resChan {
 		if result.err != nil {
 			if promErr, ok := result.err.(*client.Error); ok {
-				klog.Errorf("prom-adapter unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, promErr.Error())
+				klog.Errorf("unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, promErr.Error())
 				mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, fmt.Sprintf("%d", promErr.StatusCode)).Inc()
 			} else {
 				// Generic error handling for other types of errors
-				klog.Errorf("prom-adapter unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, result.err.Error())
+				klog.Errorf("unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, result.err.Error())
 				mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, "unknown").Inc()
 			}
 			continue

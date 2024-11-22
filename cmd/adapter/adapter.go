@@ -316,13 +316,13 @@ func setupMetricsPort() {
 	port := ":8080"
 	addr, err := net.ResolveTCPAddr("tcp", port)
 	if err != nil {
-		klog.Fatalf("[http] Failed to resolve address for prom-adapter on port 8080, error: %+v", err)
+		klog.Fatalf("[http] Failed to resolve address on port 8080, error: %+v", err)
 	}
 
 	conn, err := net.Dial("tcp", addr.String())
 	if err == nil {
 		// A listener is already active; connect to it
-		klog.Infof("[http] Found an active listener from prom-adapter on port %s, reusing the connection.", port)
+		klog.Infof("[http] Found an active listener from port %s, reusing the connection.", port)
 		conn.Close() // Close the test connection
 		return
 	}
@@ -330,15 +330,15 @@ func setupMetricsPort() {
 	// If no listener is active, create one
 	listener, err := net.Listen("tcp", port)
 	if err != nil {
-		klog.Fatalf("[http] Failed to create listener for prom-adapter on port %s, error: %+v", port, err)
+		klog.Fatalf("[http] Failed to create listener on port %s, error: %+v", port, err)
 	}
-	klog.Infof("[http] prom-adapter /metrics port listening on %s", listener.Addr())
+	klog.Infof("[http] /metrics port listening on %s", listener.Addr())
 
 	// Start serving using the listener
 	go func() {
 		err := http.Serve(listener, mux)
 		if err != nil {
-			klog.Warningf("[http] prom-adapter /metrics port error serving http: %+v", err)
+			klog.Warningf("[http] /metrics port error serving http: %+v", err)
 		}
 	}()
 }
@@ -391,6 +391,7 @@ func main() {
 	// stop channel closed on SIGTERM and SIGINT
 	stopCh := genericapiserver.SetupSignalHandler()
 
+	// Setup port to expose metrics on, and register metrics to prometheus
 	setupMetricsPort()
 
 	// construct the provider

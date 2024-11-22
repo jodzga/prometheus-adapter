@@ -85,7 +85,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		  	Type: ErrBadResponse,
 		  	ErrorMsg:  err.Error(),
 			Query: query.Encode(),
-			StatusCode: 0,
+			StatusCode: resp.StatusCode,
 		}
 	}
 
@@ -93,39 +93,29 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
 	}
 
-	// Read and decode the response body for logging
-	var respBodyStr string
-	if resp != nil {
-		respBodyBytes, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-		  respBodyStr = fmt.Sprintf("unable to read response body: %v", readErr)
-		} else {
-		  respBodyStr = string(respBodyBytes)
-		  // Recreate the response body for further use
-		  resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
-		}
-	}
 	code := resp.StatusCode
 
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
-		  	ErrorMsg: respBodyStr,
+		  	ErrorMsg: "Data returned from server was not a JSON object.",
 			StatusCode: resp.StatusCode,
 			Query: query.Encode(),
 		}
 	}
 
 	var body io.Reader = resp.Body
-	if klog.V(8).Enabled() {
-		data, err := io.ReadAll(body)
-		if err != nil {
-			return APIResponse{}, fmt.Errorf("unable to log response body: %v", err)
-		}
-		klog.Infof("Response Body: %s", string(data))
-		body = bytes.NewReader(data)
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return APIResponse{}, &Error{
+			Type: ErrBadResponse,
+			ErrorMsg:  fmt.Errorf("unable to read response body: %v", err),
+			StatusCode: resp.StatusCode,
+			Query: query.Encode(),
+		} 
 	}
+	body = bytes.NewReader(data)
 
 	var res APIResponse
 	if err = json.NewDecoder(body).Decode(&res); err != nil {
@@ -140,7 +130,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if res.Status == ResponseError {
 		return res, &Error{
 			Type: ErrBadResponse,
-			ErrorMsg:  respBodyStr,
+			ErrorMsg:  string(data),
 			StatusCode: resp.StatusCode,
 			Query: query.Encode(),
 		}

@@ -41,11 +41,8 @@ type Error struct {
 
 func (e *Error) Error() string {
 	base := fmt.Sprintf("%s: %s", e.Type, e.ErrorMsg)
-	if e.StatusCode != 0 && e.Query != "" {
-		return fmt.Sprintf("%s for status code: %d, query: %s", base, e.StatusCode, e.Query)
-	}
 	if e.Query != "" {
-		return fmt.Sprintf("%s for query: %s", base, e.Query)
+		return fmt.Sprintf("%s for status code: %d, query: %s", base, e.StatusCode, e.Query)
 	}
 	return base
 }
