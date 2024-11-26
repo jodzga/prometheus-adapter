@@ -59,9 +59,9 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	} else if verb == http.MethodPost {
 		reqBody = strings.NewReader(query.Encode())
 	}
-	humanReadableQuery := "Error, unable to read query"
-	if values, ok := query["query"]; ok && len(values) > 0 {
-		humanReadableQuery = values[0]
+	queryStr, err := url.QueryUnescape(query.Encode())
+	if err != nil {
+		klog.Errorf("Error unescaping query: %v", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
@@ -69,8 +69,8 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 			Type: ErrExec,
 			ErrorMsg:  fmt.Sprintf("error constructing HTTP request to Prometheus: %v", err),
-			Query: humanReadableQuery,
-			StatusCode: -1, // No status code since no request was sent
+			Query: queryStr,
+			StatusCode: 0, // No status code since no request was sent
 		}
 
 	}
@@ -98,8 +98,8 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 		  	Type: ErrExec,
 		  	ErrorMsg:  err.Error(),
-			StatusCode: statusCode,
-			Query: humanReadableQuery,
+			StatusCode: resp.StatusCode,
+			Query: queryStr,
 		}
 	}
 
@@ -114,18 +114,18 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		  	Type: ErrBadResponse,
 		  	ErrorMsg: "No JSON object in response with this error code.",
 			StatusCode: statusCode,
-			Query: humanReadableQuery,
+			Query: queryStr,
 		}
 	}
 
 	var body io.Reader = resp.Body
-	data, readErr := io.ReadAll(body)
-	if readErr != nil {
+	data, err := io.ReadAll(body)
+	if err != nil {
 		return APIResponse{}, &Error{
 			Type: ErrBadResponse,
 			ErrorMsg:  fmt.Sprintf("unable to read response body: %v", err),
 			StatusCode: statusCode,
-			Query: humanReadableQuery,
+			Query: queryStr,
 		} 
 	}
 	body = bytes.NewReader(data)
@@ -136,18 +136,16 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		  	Type: ErrBadResponse,
 		  	ErrorMsg:  err.Error(),
 			StatusCode: statusCode,
-			Query: humanReadableQuery,
+			Query: queryStr,
 		}
 	}
-	
-	res.StatusCode = statusCode
 
 	if res.Status == ResponseError {
 		return res, &Error{
 			Type: ErrBadResponse,
 			ErrorMsg:  string(data),
 			StatusCode: statusCode,
-			Query: humanReadableQuery,
+			Query: queryStr,
 		}
 	}
 
@@ -206,9 +204,10 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 	if err != nil {
 		return nil, err
 	}
-	humanReadableQuery := "Error, unable to read query"
-	if values, ok := vals["query"]; ok && len(values) > 0 {
-		humanReadableQuery = values[0]
+	
+	queryStr, urlErr := url.QueryUnescape(vals.Encode())
+	if urlErr != nil {
+		klog.Errorf("Error unescaping query: %v", urlErr)
 	}
 
 	var seriesRes []Series
@@ -216,8 +215,8 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 		return nil, &Error{
 			Type:       ErrBadData,
 			ErrorMsg:   fmt.Sprintf("failed to unmarshal JSON response: %v", err),
-			StatusCode: res.StatusCode,
-			Query:      humanReadableQuery,
+			StatusCode: 200,
+			Query:      queryStr,
 		}
 	}
 	return seriesRes, nil
@@ -243,12 +242,10 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 		return queryRes, &Error{
 			Type:        ErrBadData,
 			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
-			StatusCode:  res.StatusCode, // Use the status code from the response
+			StatusCode:  200,
 			Query:       string(query),
 		}
 	}
-	// Attach the StatusCode from the APIResponse to the QueryResult
-	queryRes.StatusCode = res.StatusCode
 	
 	return queryRes, nil
 }
@@ -280,11 +277,11 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 		return queryRes, &Error{
 			Type:        ErrBadData,
 			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
-			StatusCode:  res.StatusCode, // Use the status code from the response
+			StatusCode:  200,
 			Query:       string(query),
 		}
 	}
-	return queryRes, err
+	return queryRes, nil
 }
 
 // timeoutFromContext checks the context for a deadline and calculates a "timeout" duration from it,

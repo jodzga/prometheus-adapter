@@ -441,22 +441,22 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 		return nil, &client.Error{
 			Type:       client.ErrExec,
 			ErrorMsg:   fmt.Sprintf("unable to construct query: %v", err),
-			StatusCode: -1,
+			StatusCode: 0,
 			Query:      "No query crafted",
 		}
 	}
 
 	// run the query
-	rawRes, queryError := p.prom.Query(context.Background(), now, query)
-	if queryError != nil {
-		return nil, queryError
+	rawRes, queryErr := p.prom.Query(context.Background(), now, query)
+	if queryErr != nil {
+		return nil, queryErr
 	}
 
 	if rawRes.Type != pmodel.ValVector || rawRes.Vector == nil {
 		return nil, &client.Error{
 			Type:       client.ErrBadData,
 			ErrorMsg:   fmt.Sprintf("invalid or empty value of non-vector type (%s) returned", rawRes.Type),
-			StatusCode: rawRes.StatusCode,
+			StatusCode: 200,
 			Query:      string(query),
 		}
 	}
@@ -467,10 +467,11 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 		return nil, &client.Error{
 			Type:       client.ErrBadData,
 			ErrorMsg:   fmt.Sprintf("unable to find label for resource %s: %v", resource.String(), err),
-			StatusCode: rawRes.StatusCode,
+			StatusCode: 200,
 			Query:      string(query),
 		}
 	}
+
 	// associate the results back to each given pod or node
 	res := make(queryResults, len(*rawRes.Vector))
 	for _, sample := range *rawRes.Vector {

@@ -301,9 +301,7 @@ func (cmd *PrometheusAdapter) addResourceMetricsAPI(promClient prom.Client, stop
 
 func setupMetricsPort(port string) {
 	mux := http.NewServeMux()
-
 	mux.Handle("/metrics", promhttp.Handler())
-
 	go func() {
 		klog.Infof("[http] listening on %s", port)
 		err := http.ListenAndServe(port, mux)
@@ -361,7 +359,7 @@ func main() {
 	// stop channel closed on SIGTERM and SIGINT
 	stopCh := genericapiserver.SetupSignalHandler()
 
-	// Setup port to expose metrics on, and register metrics to prometheus
+	// Setup port to expose metrics on
 	setupMetricsPort(cmd.MetricsPort)
 
 	// construct the provider

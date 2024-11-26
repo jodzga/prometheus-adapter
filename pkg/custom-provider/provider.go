@@ -147,15 +147,15 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 	// TODO: use an actual context
 	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), query)
 	if err != nil {
-		klog.Errorf("unable to fetch metrics from metrics source: %s", err.Error())
+		klog.Errorf("unable to fetch metrics from prometheus: %s", err.Error())
 		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", err.StatusCode)).Inc()
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
 
 	if queryResults.Type != pmodel.ValVector {
-		klog.Errorf("unexpected results from metrics source: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
-		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", queryResults.StatusCode)).Inc()
+		klog.Errorf("unexpected results from prometheus: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
+		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", 200)).Inc()
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
 	mprom.CustomMetricsSuccessCounter.WithLabelValues().Inc()

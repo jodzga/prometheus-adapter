@@ -62,8 +62,6 @@ type QueryResult struct {
 	Vector *model.Vector
 	Scalar *model.Scalar
 	Matrix *model.Matrix
-
-	StatusCode int
 }
 
 func (qr *QueryResult) UnmarshalJSON(b []byte) error {

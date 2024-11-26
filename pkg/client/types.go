@@ -66,7 +66,4 @@ type APIResponse struct {
 	ErrorType ErrorType `json:"errorType"`
 	// Error is the error message, if this is an error response.
 	Error string `json:"error"`
-
-	// StatusCode is the status code returned by the server
-	StatusCode int `json:"statusCode"`
 }
