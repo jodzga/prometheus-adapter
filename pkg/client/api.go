@@ -40,7 +40,7 @@ type GenericAPIClient interface {
 	// parameters should be in `query`, not `endpoint`.  An error will be returned on HTTP
 	// status errors or errors making or unmarshalling the request, as well as when the
 	// response has a Status of ResponseError.
-	Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, error)
+	Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, *Error)
 }
 
 // httpAPIClient is a GenericAPIClient implemented in terms of an underlying http.Client.
@@ -50,7 +50,7 @@ type httpAPIClient struct {
 	headers http.Header
 }
 
-func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, error) {
+func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, *Error) {
 	u := *c.baseURL
 	u.Path = path.Join(c.baseURL.Path, endpoint)
 	var reqBody io.Reader
@@ -59,10 +59,20 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	} else if verb == http.MethodPost {
 		reqBody = strings.NewReader(query.Encode())
 	}
+	humanReadableQuery := "Error, unable to read query"
+	if values, ok := query["query"]; ok && len(values) > 0 {
+		humanReadableQuery = values[0]
+	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
 	if err != nil {
-		return APIResponse{}, fmt.Errorf("error constructing HTTP request to Prometheus: %v", err)
+		return APIResponse{}, &Error{
+			Type: ErrExec,
+			ErrorMsg:  fmt.Sprintf("error constructing HTTP request to Prometheus: %v", err),
+			Query: humanReadableQuery,
+			StatusCode: -1, // No status code since no request was sent
+		}
+
 	}
 	for key, values := range c.headers {
 		for _, value := range values {
@@ -84,8 +94,8 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
 		  	ErrorMsg:  err.Error(),
-			Query: query.Encode(),
 			StatusCode: resp.StatusCode,
+			Query: humanReadableQuery,
 		}
 	}
 
@@ -99,20 +109,20 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
-		  	ErrorMsg: "Data returned from server was not a JSON object.",
+		  	ErrorMsg: "No JSON object in response with this error code.",
 			StatusCode: resp.StatusCode,
-			Query: query.Encode(),
+			Query: humanReadableQuery,
 		}
 	}
 
 	var body io.Reader = resp.Body
-	data, err := io.ReadAll(body)
-	if err != nil {
+	data, readErr := io.ReadAll(body)
+	if readErr != nil {
 		return APIResponse{}, &Error{
 			Type: ErrBadResponse,
-			ErrorMsg:  fmt.Errorf("unable to read response body: %v", err),
+			ErrorMsg:  fmt.Sprintf("unable to read response body: %v", err),
 			StatusCode: resp.StatusCode,
-			Query: query.Encode(),
+			Query: humanReadableQuery,
 		} 
 	}
 	body = bytes.NewReader(data)
@@ -123,16 +133,18 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		  	Type: ErrBadResponse,
 		  	ErrorMsg:  err.Error(),
 			StatusCode: resp.StatusCode,
-			Query: query.Encode(),
+			Query: humanReadableQuery,
 		}
 	}
+	
+	res.StatusCode = resp.StatusCode
 
 	if res.Status == ResponseError {
 		return res, &Error{
 			Type: ErrBadResponse,
 			ErrorMsg:  string(data),
 			StatusCode: resp.StatusCode,
-			Query: query.Encode(),
+			Query: humanReadableQuery,
 		}
 	}
 
@@ -174,7 +186,7 @@ func NewClient(client *http.Client, baseURL *url.URL, headers http.Header, verb 
 	return NewClientForAPI(genericClient, verb)
 }
 
-func (h *queryClient) Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, error) {
+func (h *queryClient) Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, *Error) {
 	vals := url.Values{}
 	if interval.Start != 0 {
 		vals.Set("start", interval.Start.String())
@@ -191,13 +203,24 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 	if err != nil {
 		return nil, err
 	}
+	humanReadableQuery := "Error, unable to read query"
+	if values, ok := vals["query"]; ok && len(values) > 0 {
+		humanReadableQuery = values[0]
+	}
 
 	var seriesRes []Series
-	err = json.Unmarshal(res.Data, &seriesRes)
-	return seriesRes, err
+	if err := json.Unmarshal(res.Data, &seriesRes); err != nil {
+		return nil, &Error{
+			Type:       ErrBadData,
+			ErrorMsg:   fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			StatusCode: res.StatusCode,
+			Query:      humanReadableQuery,
+		}
+	}
+	return seriesRes, nil
 }
 
-func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (QueryResult, error) {
+func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (QueryResult, *Error) {
 	vals := url.Values{}
 	vals.Set("query", string(query))
 	if t != 0 {
@@ -213,11 +236,21 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 	}
 
 	var queryRes QueryResult
-	err = json.Unmarshal(res.Data, &queryRes)
-	return queryRes, err
+	if err := json.Unmarshal(res.Data, &queryRes); err != nil {
+		return queryRes, &Error{
+			Type:        ErrBadData,
+			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			StatusCode:  res.StatusCode, // Use the status code from the response
+			Query:       string(query),
+		}
+	}
+	// Attach the StatusCode from the APIResponse to the QueryResult
+	queryRes.StatusCode = res.StatusCode
+	
+	return queryRes, nil
 }
 
-func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (QueryResult, error) {
+func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (QueryResult, *Error) {
 	vals := url.Values{}
 	vals.Set("query", string(query))
 
@@ -240,7 +273,14 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 	}
 
 	var queryRes QueryResult
-	err = json.Unmarshal(res.Data, &queryRes)
+	if err := json.Unmarshal(res.Data, &queryRes); err != nil {
+		return queryRes, &Error{
+			Type:        ErrBadData,
+			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			StatusCode:  res.StatusCode, // Use the status code from the response
+			Query:       string(query),
+		}
+	}
 	return queryRes, err
 }
 

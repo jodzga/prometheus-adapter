@@ -52,17 +52,11 @@ func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, name
 		return nil, provider.NewMetricNotFoundError(p.selectGroupResource(namespace), info.Metric)
 	}
 	// Here is where we're making the query, need to be before here xD
-	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), selector)
-
-	if err != nil {
-		if promErr, ok := err.(*prom.Error); ok { // Check if the error is of type *prom.Error
-			klog.Errorf("unable to fetch metrics from prometheus: %s", err.Error())
-			mprom.ExternalMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", promErr.StatusCode)).Inc()
-		} else {
-			// Generic error handling for other types of errors
-			klog.Errorf("unexpected error fetching metrics from prometheus: %s", err.Error())
-			mprom.ExternalMetricsFailureCounter.WithLabelValues("unknown").Inc()
-		}
+	var queryResults prom.QueryResult
+	var queryError *prom.Error
+	if queryResults, queryError = p.promClient.Query(ctx, pmodel.Now(), selector); queryError != nil {
+		klog.Errorf("unable to fetch metrics from metrics source: %s", queryError.Error())
+		mprom.ExternalMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", queryError.StatusCode)).Inc()
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}

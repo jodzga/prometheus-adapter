@@ -118,7 +118,7 @@ type resourceProvider struct {
 type nsQueryResults struct {
 	namespace string
 	cpu, mem  queryResults
-	err       error
+	err       *client.Error
 }
 
 // GetPodMetrics implements the api.MetricsProvider interface.
@@ -160,14 +160,8 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 	resultsByNs := make(map[string][]nsQueryResults, len(podsByNsBatched))
 	for result := range resChan {
 		if result.err != nil {
-			if promErr, ok := result.err.(*client.Error); ok {
-				klog.Errorf("unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, promErr.Error())
-				mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, fmt.Sprintf("%d", promErr.StatusCode)).Inc()
-			} else {
-				// Generic error handling for other types of errors
-				klog.Errorf("unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, result.err.Error())
-				mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, "unknown").Inc()
-			}
+			klog.Errorf("unable to fetch metrics for pods in namespace %q, error: %s", result.namespace, result.err.Error())
+			mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, fmt.Sprintf("%d", result.err.StatusCode)).Inc()
 			continue
 		}
 		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
@@ -339,14 +333,8 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 	// run the actual query
 	qRes := p.queryBoth(now, nodeResource, "", nodeNames...)
 	if qRes.err != nil {
-		if promErr, ok := qRes.err.(*client.Error); ok {
-			klog.Errorf("failed querying node metrics: %s", promErr.Error())
-			mprom.NodeQueryFailureCounter.WithLabelValues(fmt.Sprintf("%d", promErr.StatusCode)).Inc()
-		} else {
-			// Generic error handling for other types of errors
-			klog.Errorf("failed querying node metrics: %s", qRes.err.Error())
-			mprom.NodeQueryFailureCounter.WithLabelValues("unknown").Inc()
-		}
+		klog.Errorf("failed querying node metrics: %s", qRes.err.Error())
+		mprom.NodeQueryFailureCounter.WithLabelValues(fmt.Sprintf("%d", qRes.err.StatusCode)).Inc()
 		return resMetrics, nil
 	}
 
@@ -398,7 +386,7 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 // either query fails.
 func (p *resourceProvider) queryBoth(now pmodel.Time, resource schema.GroupResource, namespace string, names ...string) nsQueryResults {
 	var cpuRes, memRes queryResults
-	var cpuErr, memErr error
+	var cpuErr, memErr *client.Error
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -412,42 +400,16 @@ func (p *resourceProvider) queryBoth(now pmodel.Time, resource schema.GroupResou
 	}()
 	wg.Wait()
 
-	if cpuErr != nil {
-		if promErr, ok := cpuErr.(*client.Error); ok {
-			return nsQueryResults{
-				namespace: namespace,
-				err:      &client.Error{
-					Type: promErr.Type,
-					ErrorMsg:  fmt.Sprintf("unable to fetch node CPU metrics: %s", promErr.ErrorMsg),
-					Query: promErr.Query,
-					StatusCode: promErr.StatusCode,
-				},
-			}
-		} else {
-			// Generic error handling for other types of errors
-			return nsQueryResults{
-				namespace: namespace,
-				err:       fmt.Errorf("unable to fetch node CPU metrics: %v", cpuErr),
-			}
+	if cpuErr != nil  {
+		return nsQueryResults{
+			namespace: namespace,
+			err:       cpuErr,
 		}
 	}
 	if memErr != nil {
-		if promErr, ok := cpuErr.(*client.Error); ok {
-			return nsQueryResults{
-				namespace: namespace,
-				err:      &client.Error{
-					Type: promErr.Type,
-					ErrorMsg:  fmt.Sprintf("unable to fetch node memory metrics: %s", promErr.ErrorMsg),
-					Query: promErr.Query,
-					StatusCode: promErr.StatusCode,
-				},
-			}
-		} else {
-			// Generic error handling for other types of errors
-			return nsQueryResults{
-				namespace: namespace,
-				err:       fmt.Errorf("unable to fetch node memory metrics: %v", cpuErr),
-			}
+		return nsQueryResults{
+			namespace: namespace,
+			err:       memErr,
 		}
 	}
 
@@ -463,7 +425,7 @@ type queryResults map[string][]*pmodel.Sample
 
 // runQuery actually queries Prometheus for the metric represented by the given query information, on
 // the given Kubernetes API resource (pods or nodes).
-func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, resource schema.GroupResource, namespace string, names ...string) (queryResults, error) {
+func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, resource schema.GroupResource, namespace string, names ...string) (queryResults, *client.Error) {
 	var query client.Selector
 	var err error
 
@@ -475,25 +437,39 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 		query, err = queryInfo.contQuery.Build("", resource, namespace, extraGroupBy, labels.Everything(), names...)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("unable to construct query: %v", err)
+		return nil, &client.Error{
+			Type:       client.ErrExec,
+			ErrorMsg:   fmt.Sprintf("unable to construct query: %v", err),
+			StatusCode: -1,
+			Query:      "No query crafted",
+		}
 	}
 
 	// run the query
-	rawRes, err := p.prom.Query(context.Background(), now, query)
-	if err != nil {
-		return nil, err
+	rawRes, queryError := p.prom.Query(context.Background(), now, query)
+	if queryError != nil {
+		return nil, queryError
 	}
 
 	if rawRes.Type != pmodel.ValVector || rawRes.Vector == nil {
-		return nil, fmt.Errorf("invalid or empty value of non-vector type (%s) returned", rawRes.Type)
+		return nil, &client.Error{
+			Type:       client.ErrBadData,
+			ErrorMsg:   fmt.Sprintf("invalid or empty value of non-vector type (%s) returned", rawRes.Type),
+			StatusCode: rawRes.StatusCode,
+			Query:      string(query),
+		}
 	}
 
 	// check the appropriate label for the resource in question
 	resourceLbl, err := queryInfo.converter.LabelForResource(resource)
 	if err != nil {
-		return nil, fmt.Errorf("unable to find label for resource %s: %v", resource.String(), err)
+		return nil, &client.Error{
+			Type:       client.ErrBadData,
+			ErrorMsg:   fmt.Sprintf("unable to find label for resource %s: %v", resource.String(), err),
+			StatusCode: rawRes.StatusCode,
+			Query:      string(query),
+		}
 	}
-
 	// associate the results back to each given pod or node
 	res := make(queryResults, len(*rawRes.Vector))
 	for _, sample := range *rawRes.Vector {

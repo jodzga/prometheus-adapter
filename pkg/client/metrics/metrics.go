@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	apimetrics "k8s.io/apiserver/pkg/endpoints/metrics"
 	"k8s.io/component-base/metrics"
@@ -46,7 +47,7 @@ var (
 		[]string{"path", "server"},
 	)
 
-	ExternalMetricsFailureCounter = prometheus.NewCounterVec(
+	ExternalMetricsFailureCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "external_metrics_query_failure_total",
 			Help: "Total number of failed external metrics query attempts",
@@ -54,23 +55,23 @@ var (
 		[]string{"statusCode"},
 	)
 
-	PodQueryFailureCounter = prometheus.NewCounterVec(
+	PodQueryFailureCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "namespace_query_failure_total",
-			Help: "Total number of failed namespace query attempts in GetPodMetrics, labeled by namespace and status code",
+			Help: "Total number of failed namespace query attempts in GetPodMetrics",
 		},
 		[]string{"namespace", "statusCode"},
 	)
 
-	NodeQueryFailureCounter = prometheus.NewCounterVec(
+	NodeQueryFailureCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "node_query_failure_total",
-			Help: "Total number of failed node query attempts in GetNodeMetrics, labeled by status code",
+			Help: "Total number of failed node query attempts in GetNodeMetrics",
 		},
 		[]string{"statusCode"},
 	)
 
-	CustomMetricsFailureCounter = prometheus.NewCounterVec(
+	CustomMetricsFailureCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "custom_metrics_query_failure_total",
 			Help: "Total number of failed custom metrics query attempts",
@@ -78,13 +79,6 @@ var (
 		[]string{"statusCode"},
 	)
 )
-
-func RegisterMetrics() {
-	prometheus.MustRegister(ExternalMetricsFailureCounter)
-	prometheus.MustRegister(PodQueryFailureCounter)
-	prometheus.MustRegister(NodeQueryFailureCounter)
-	prometheus.MustRegister(CustomMetricsFailureCounter)
-}
 
 func MetricsHandler() (http.HandlerFunc, error) {
 	registry := metrics.NewKubeRegistry()
@@ -106,14 +100,14 @@ type instrumentedGenericClient struct {
 	client     client.GenericAPIClient
 }
 
-func (c *instrumentedGenericClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (client.APIResponse, error) {
+func (c *instrumentedGenericClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (client.APIResponse, *client.Error) {
 	startTime := time.Now()
-	var err error
+	var err *client.Error
 	defer func() {
 		endTime := time.Now()
 		// skip calls where we don't make the actual request
 		if err != nil {
-			if _, wasAPIErr := err.(*client.Error); !wasAPIErr {
+			if err.Type != client.ErrExec {
 				// TODO: measure API errors by code?
 				return
 			}

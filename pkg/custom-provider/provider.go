@@ -147,20 +147,14 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 	// TODO: use an actual context
 	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), query)
 	if err != nil {
-		if promErr, ok := err.(*prom.Error); ok { // Check if the error is of type *prom.Error
-			klog.Errorf("unable to fetch metrics from prometheus: %s", promErr.Error())
-			mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", promErr.StatusCode)).Inc()
-		} else {
-			// Generic error handling for other types of errors
-			klog.Errorf("unexpected error fetching metrics from prometheus: %s", err.Error())
-			mprom.CustomMetricsFailureCounter.WithLabelValues("unknown").Inc()
-		}
+		klog.Errorf("unable to fetch metrics from metrics source: %s", err.Error())
+		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", err.StatusCode)).Inc()
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
 
 	if queryResults.Type != pmodel.ValVector {
-		klog.Errorf("unexpected results from prometheus: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
+		klog.Errorf("unexpected results from metrics source: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
 

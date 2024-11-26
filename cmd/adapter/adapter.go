@@ -20,7 +20,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,7 +52,6 @@ import (
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 	resprov "sigs.k8s.io/prometheus-adapter/pkg/resourceprovider"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -87,6 +85,8 @@ type PrometheusAdapter struct {
 	// DisableHTTP2 indicates that http2 should not be enabled.
 	DisableHTTP2  bool
 	metricsConfig *adaptercfg.MetricsDiscoveryConfig
+	// MetricsPort is the port on which metrics should be exposed for scraping by Prometheus
+	MetricsPort string
 }
 
 func (cmd *PrometheusAdapter) makePromClient() (prom.Client, error) {
@@ -161,7 +161,7 @@ func (cmd *PrometheusAdapter) addFlags() {
 		"period for which to query the set of available metrics from Prometheus")
 	cmd.Flags().BoolVar(&cmd.DisableHTTP2, "disable-http2", cmd.DisableHTTP2,
 		"Disable HTTP/2 support")
-
+	cmd.Flags().StringVar(&cmd.MetricsPort, "metrics-port", cmd.MetricsPort, "Port on which to expose metrics for scraping")
 	// Add logging flags
 	logs.AddFlags(cmd.Flags())
 }
@@ -299,46 +299,16 @@ func (cmd *PrometheusAdapter) addResourceMetricsAPI(promClient prom.Client, stop
 	return nil
 }
 
-func setupMetricsPort() {
+func setupMetricsPort(port string) {
 	mux := http.NewServeMux()
 
-	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
-		prometheus.DefaultRegisterer,
-		promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
-			ErrorHandling: promhttp.PanicOnError,
-		}),
-	))
+	mux.Handle("/metrics", promhttp.Handler())
 
-	// Register the metric with Prometheus.
-	mprom.RegisterMetrics()
-
-	// Check if a listener is already active on port 8080
-	port := ":8080"
-	addr, err := net.ResolveTCPAddr("tcp", port)
-	if err != nil {
-		klog.Fatalf("[http] Failed to resolve address on port 8080, error: %+v", err)
-	}
-
-	conn, err := net.Dial("tcp", addr.String())
-	if err == nil {
-		// A listener is already active; connect to it
-		klog.Infof("[http] Found an active listener from port %s, reusing the connection.", port)
-		conn.Close() // Close the test connection
-		return
-	}
-
-	// If no listener is active, create one
-	listener, err := net.Listen("tcp", port)
-	if err != nil {
-		klog.Fatalf("[http] Failed to create listener on port %s, error: %+v", port, err)
-	}
-	klog.Infof("[http] /metrics port listening on %s", listener.Addr())
-
-	// Start serving using the listener
 	go func() {
-		err := http.Serve(listener, mux)
+		klog.Infof("[http] listening on %s", port)
+		err := http.ListenAndServe(port, mux)
 		if err != nil {
-			klog.Warningf("[http] /metrics port error serving http: %+v", err)
+			klog.Warningf("[http] error serving http: %+v", err)
 		}
 	}()
 }
@@ -392,7 +362,7 @@ func main() {
 	stopCh := genericapiserver.SetupSignalHandler()
 
 	// Setup port to expose metrics on, and register metrics to prometheus
-	setupMetricsPort()
+	setupMetricsPort(cmd.MetricsPort)
 
 	// construct the provider
 	cmProvider, err := cmd.makeProvider(promClient, stopCh)
