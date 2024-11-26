@@ -155,9 +155,10 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 
 	if queryResults.Type != pmodel.ValVector {
 		klog.Errorf("unexpected results from metrics source: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
+		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", queryResults.StatusCode)).Inc()
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
-
+	mprom.CustomMetricsSuccessCounter.WithLabelValues().Inc()
 	return *queryResults.Vector, nil
 }
 

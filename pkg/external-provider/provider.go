@@ -60,6 +60,7 @@ func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, name
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
+	mprom.ExternalMetricsSuccessCounter.WithLabelValues().Inc()
 	return p.metricConverter.Convert(info, queryResults)
 }
 

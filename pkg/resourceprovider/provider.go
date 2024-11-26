@@ -164,6 +164,7 @@ func (p *resourceProvider) GetPodMetrics(pods ...*metav1.PartialObjectMetadata) 
 			mprom.PodQueryFailureCounter.WithLabelValues(result.namespace, fmt.Sprintf("%d", result.err.StatusCode)).Inc()
 			continue
 		}
+		mprom.PodQuerySuccessCounter.WithLabelValues(result.namespace).Inc()
 		resultsByNs[result.namespace] = append(resultsByNs[result.namespace], result)
 	}
 
@@ -337,7 +338,7 @@ func (p *resourceProvider) GetNodeMetrics(nodes ...*corev1.Node) ([]metrics.Node
 		mprom.NodeQueryFailureCounter.WithLabelValues(fmt.Sprintf("%d", qRes.err.StatusCode)).Inc()
 		return resMetrics, nil
 	}
-
+	mprom.NodeQuerySuccessCounter.WithLabelValues().Inc()
 	// organize the results
 	for i, nodeName := range nodeNames {
 		// skip if any data is missing

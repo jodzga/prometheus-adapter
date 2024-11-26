@@ -89,12 +89,16 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 			resp.Body.Close()
 		}
 	}()
-
+	
+	statusCode := -1
+	if resp != nil {
+		statusCode = resp.StatusCode
+	}
 	if err != nil {
 		return APIResponse{}, &Error{
-		  	Type: ErrBadResponse,
+		  	Type: ErrExec,
 		  	ErrorMsg:  err.Error(),
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Query: humanReadableQuery,
 		}
 	}
@@ -103,14 +107,13 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
 	}
 
-	code := resp.StatusCode
 
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
-	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
+	if statusCode/100 != 2 && statusCode != 400 && statusCode != 422 && statusCode != 503 {
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
 		  	ErrorMsg: "No JSON object in response with this error code.",
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Query: humanReadableQuery,
 		}
 	}
@@ -121,7 +124,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 			Type: ErrBadResponse,
 			ErrorMsg:  fmt.Sprintf("unable to read response body: %v", err),
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Query: humanReadableQuery,
 		} 
 	}
@@ -132,18 +135,18 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
 		  	ErrorMsg:  err.Error(),
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Query: humanReadableQuery,
 		}
 	}
 	
-	res.StatusCode = resp.StatusCode
+	res.StatusCode = statusCode
 
 	if res.Status == ResponseError {
 		return res, &Error{
 			Type: ErrBadResponse,
 			ErrorMsg:  string(data),
-			StatusCode: resp.StatusCode,
+			StatusCode: statusCode,
 			Query: humanReadableQuery,
 		}
 	}

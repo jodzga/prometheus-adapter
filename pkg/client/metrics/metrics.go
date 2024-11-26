@@ -47,12 +47,28 @@ var (
 		[]string{"path", "server"},
 	)
 
+	ExternalMetricsSuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "external_metrics_query_success_total",
+			Help: "Total number of successful external metrics query attempts",
+		},
+		[]string{},
+	)
+
 	ExternalMetricsFailureCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "external_metrics_query_failure_total",
 			Help: "Total number of failed external metrics query attempts",
 		},
 		[]string{"statusCode"},
+	)
+
+	PodQuerySuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "namespace_query_success_total",
+			Help: "Total number of successful namespace query attempts in GetPodMetrics",
+		},
+		[]string{"namespace"},
 	)
 
 	PodQueryFailureCounter = promauto.NewCounterVec(
@@ -63,12 +79,28 @@ var (
 		[]string{"namespace", "statusCode"},
 	)
 
+	NodeQuerySuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "node_query_success_total",
+			Help: "Total number of successful node query attempts in GetNodeMetrics",
+		},
+		[]string{},
+	)
+
 	NodeQueryFailureCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "node_query_failure_total",
 			Help: "Total number of failed node query attempts in GetNodeMetrics",
 		},
 		[]string{"statusCode"},
+	)
+
+	CustomMetricsSuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "custom_metrics_query_success_total",
+			Help: "Total number of successful custom metrics query attempts",
+		},
+		[]string{},
 	)
 
 	CustomMetricsFailureCounter = promauto.NewCounterVec(
