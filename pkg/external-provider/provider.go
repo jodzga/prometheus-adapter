@@ -55,7 +55,7 @@ func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, name
 	queryResults, queryErr := p.promClient.Query(ctx, pmodel.Now(), selector)
 
 	if queryErr != nil {
-		klog.Errorf("unable to fetch metrics from prometheus: %v", queryErr)
+		klog.Errorf("unable to fetch external metrics from prometheus: %v", queryErr)
 		mprom.ExternalMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", queryErr.StatusCode)).Inc()
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
