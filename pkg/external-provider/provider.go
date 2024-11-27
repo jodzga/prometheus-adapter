@@ -29,8 +29,8 @@ import (
 	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 
 	prom "sigs.k8s.io/prometheus-adapter/pkg/client"
-	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
+	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 )
 
 type externalPrometheusProvider struct {

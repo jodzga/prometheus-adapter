@@ -33,9 +33,9 @@ const (
 
 // Error is an error returned by the API.
 type Error struct {
-	Type ErrorType
-	Msg  string
-	Query string
+	Type       ErrorType
+	Msg        string
+	Query      string
 	StatusCode int
 }
 

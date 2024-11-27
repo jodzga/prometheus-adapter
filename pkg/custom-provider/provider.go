@@ -20,11 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"time"
 	"net/http"
+	"time"
 
 	pmodel "github.com/prometheus/common/model"
-	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
 	apierr "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -36,6 +35,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/klog/v2"
 	"k8s.io/metrics/pkg/apis/custom_metrics"
+	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
 
 	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider/helpers"
