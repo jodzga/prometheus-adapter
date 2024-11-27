@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"time"
+	"net/http"
 
 	pmodel "github.com/prometheus/common/model"
 	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
@@ -155,7 +156,7 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 
 	if queryResults.Type != pmodel.ValVector {
 		klog.Errorf("unexpected results from prometheus: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
-		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", 200)).Inc()
+		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", http.StatusOK)).Inc() // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
 	mprom.CustomMetricsSuccessCounter.WithLabelValues().Inc()

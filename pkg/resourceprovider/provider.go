@@ -22,6 +22,7 @@ import (
 	"math"
 	"sync"
 	"time"
+	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -456,7 +457,7 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 		return nil, &client.Error{
 			Type:       client.ErrBadData,
 			ErrorMsg:   fmt.Sprintf("invalid or empty value of non-vector type (%s) returned", rawRes.Type),
-			StatusCode: 200,
+			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:      string(query),
 		}
 	}
@@ -467,7 +468,7 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 		return nil, &client.Error{
 			Type:       client.ErrBadData,
 			ErrorMsg:   fmt.Sprintf("unable to find label for resource %s: %v", resource.String(), err),
-			StatusCode: 200,
+			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:      string(query),
 		}
 	}

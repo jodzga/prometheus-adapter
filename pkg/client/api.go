@@ -59,9 +59,11 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	} else if verb == http.MethodPost {
 		reqBody = strings.NewReader(query.Encode())
 	}
-	queryStr, err := url.QueryUnescape(query.Encode())
-	if err != nil {
-		klog.Errorf("Error unescaping query: %v", err)
+	queryStr := query.Encode()
+	if unescapedQueryStr, err := url.QueryUnescape(queryStr); err == nil {
+		queryStr = unescapedQueryStr
+	} else {
+		klog.Errorf("Error %v unescaping query %s", err, queryStr)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
@@ -89,11 +91,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 			resp.Body.Close()
 		}
 	}()
-	
-	statusCode := -1
-	if resp != nil {
-		statusCode = resp.StatusCode
-	}
+
 	if err != nil {
 		return APIResponse{}, &Error{
 		  	Type: ErrExec,
@@ -107,13 +105,14 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
 	}
 
+	code := resp.StatusCode
 
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
-	if statusCode/100 != 2 && statusCode != 400 && statusCode != 422 && statusCode != 503 {
+	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
 		  	ErrorMsg: "No JSON object in response with this error code.",
-			StatusCode: statusCode,
+			StatusCode: code,
 			Query: queryStr,
 		}
 	}
@@ -123,8 +122,8 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if err != nil {
 		return APIResponse{}, &Error{
 			Type: ErrBadResponse,
-			ErrorMsg:  fmt.Sprintf("unable to read response body: %v", err),
-			StatusCode: statusCode,
+			ErrorMsg:  fmt.Sprintf("unable to read response body %s with error %v", string(data), err),
+			StatusCode: code,
 			Query: queryStr,
 		} 
 	}
@@ -135,16 +134,16 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
 		  	ErrorMsg:  err.Error(),
-			StatusCode: statusCode,
+			StatusCode: code,
 			Query: queryStr,
 		}
 	}
 
 	if res.Status == ResponseError {
 		return res, &Error{
-			Type: ErrBadResponse,
-			ErrorMsg:  string(data),
-			StatusCode: statusCode,
+			Type: res.ErrorType,
+			ErrorMsg:  res.Error,
+			StatusCode: code,
 			Query: queryStr,
 		}
 	}
@@ -204,10 +203,12 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 	if err != nil {
 		return nil, err
 	}
-	
-	queryStr, urlErr := url.QueryUnescape(vals.Encode())
-	if urlErr != nil {
-		klog.Errorf("Error unescaping query: %v", urlErr)
+
+	queryStr := vals.Encode()
+	if unescapedQueryStr, err := url.QueryUnescape(queryStr); err == nil {
+		queryStr = unescapedQueryStr
+	} else {
+		klog.Errorf("Error %v unescaping query %s", err, queryStr)
 	}
 
 	var seriesRes []Series
@@ -215,7 +216,7 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 		return nil, &Error{
 			Type:       ErrBadData,
 			ErrorMsg:   fmt.Sprintf("failed to unmarshal JSON response: %v", err),
-			StatusCode: 200,
+			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from api.Do(), api call/response was successful
 			Query:      queryStr,
 		}
 	}
@@ -242,7 +243,7 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 		return queryRes, &Error{
 			Type:        ErrBadData,
 			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
-			StatusCode:  200,
+			StatusCode:  http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:       string(query),
 		}
 	}
@@ -277,7 +278,7 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 		return queryRes, &Error{
 			Type:        ErrBadData,
 			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
-			StatusCode:  200,
+			StatusCode:  http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:       string(query),
 		}
 	}
