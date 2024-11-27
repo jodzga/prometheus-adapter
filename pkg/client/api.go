@@ -70,7 +70,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if err != nil {
 		return APIResponse{}, &Error{
 			Type: ErrExec,
-			ErrorMsg:  fmt.Sprintf("error constructing HTTP request to Prometheus: %v", err),
+			Msg:  fmt.Sprintf("error constructing HTTP request to Prometheus: %v", err),
 			Query: queryStr,
 			StatusCode: 0, // No status code since no request was sent
 		}
@@ -95,7 +95,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if err != nil {
 		return APIResponse{}, &Error{
 		  	Type: ErrExec,
-		  	ErrorMsg:  err.Error(),
+		  	Msg:  err.Error(),
 			StatusCode: resp.StatusCode,
 			Query: queryStr,
 		}
@@ -111,7 +111,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
-		  	ErrorMsg: "No JSON object in response with this error code.",
+		  	Msg: "No JSON object in response with this error code.",
 			StatusCode: code,
 			Query: queryStr,
 		}
@@ -122,7 +122,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if err != nil {
 		return APIResponse{}, &Error{
 			Type: ErrBadResponse,
-			ErrorMsg:  fmt.Sprintf("unable to read response body %s with error %v", string(data), err),
+			Msg:  fmt.Sprintf("unable to read response body %s with error %v", string(data), err),
 			StatusCode: code,
 			Query: queryStr,
 		} 
@@ -133,7 +133,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if err = json.NewDecoder(body).Decode(&res); err != nil {
 		return APIResponse{}, &Error{
 		  	Type: ErrBadResponse,
-		  	ErrorMsg:  err.Error(),
+		  	Msg:  err.Error(),
 			StatusCode: code,
 			Query: queryStr,
 		}
@@ -142,7 +142,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if res.Status == ResponseError {
 		return res, &Error{
 			Type: res.ErrorType,
-			ErrorMsg:  res.Error,
+			Msg:  res.Error,
 			StatusCode: code,
 			Query: queryStr,
 		}
@@ -215,7 +215,7 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 	if err := json.Unmarshal(res.Data, &seriesRes); err != nil {
 		return nil, &Error{
 			Type:       ErrBadData,
-			ErrorMsg:   fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			Msg:   fmt.Sprintf("failed to unmarshal JSON response: %v", err),
 			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from api.Do(), api call/response was successful
 			Query:      queryStr,
 		}
@@ -242,7 +242,7 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 	if err := json.Unmarshal(res.Data, &queryRes); err != nil {
 		return queryRes, &Error{
 			Type:        ErrBadData,
-			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			Msg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
 			StatusCode:  http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:       string(query),
 		}
@@ -277,7 +277,7 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 	if err := json.Unmarshal(res.Data, &queryRes); err != nil {
 		return queryRes, &Error{
 			Type:        ErrBadData,
-			ErrorMsg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			Msg:    fmt.Sprintf("failed to unmarshal JSON response: %v", err),
 			StatusCode:  http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:       string(query),
 		}

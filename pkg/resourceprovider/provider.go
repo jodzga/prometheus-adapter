@@ -441,7 +441,7 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 	if err != nil {
 		return nil, &client.Error{
 			Type:       client.ErrExec,
-			ErrorMsg:   fmt.Sprintf("unable to construct query: %v", err),
+			Msg:   fmt.Sprintf("unable to construct query: %v", err),
 			StatusCode: 0,
 			Query:      "No query crafted",
 		}
@@ -456,7 +456,7 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 	if rawRes.Type != pmodel.ValVector || rawRes.Vector == nil {
 		return nil, &client.Error{
 			Type:       client.ErrBadData,
-			ErrorMsg:   fmt.Sprintf("invalid or empty value of non-vector type (%s) returned", rawRes.Type),
+			Msg:   fmt.Sprintf("invalid or empty value of non-vector type (%s) returned", rawRes.Type),
 			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:      string(query),
 		}
@@ -467,7 +467,7 @@ func (p *resourceProvider) runQuery(now pmodel.Time, queryInfo resourceQuery, re
 	if err != nil {
 		return nil, &client.Error{
 			Type:       client.ErrBadData,
-			ErrorMsg:   fmt.Sprintf("unable to find label for resource %s: %v", resource.String(), err),
+			Msg:   fmt.Sprintf("unable to find label for resource %s: %v", resource.String(), err),
 			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 			Query:      string(query),
 		}
