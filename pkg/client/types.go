@@ -33,12 +33,18 @@ const (
 
 // Error is an error returned by the API.
 type Error struct {
-	Type ErrorType
-	Msg  string
+	Type       ErrorType
+	Msg        string
+	Query      string
+	StatusCode int
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Type, e.Msg)
+	base := fmt.Sprintf("%s: %s", e.Type, e.Msg)
+	if e.Query != "" {
+		return fmt.Sprintf("%s (status code: %d, query: %s)", base, e.StatusCode, e.Query)
+	}
+	return base
 }
 
 // ResponseStatus is the type of response from the API: succeeded or error.

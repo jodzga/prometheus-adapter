@@ -40,7 +40,7 @@ type GenericAPIClient interface {
 	// parameters should be in `query`, not `endpoint`.  An error will be returned on HTTP
 	// status errors or errors making or unmarshalling the request, as well as when the
 	// response has a Status of ResponseError.
-	Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, error)
+	Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, *Error)
 }
 
 // httpAPIClient is a GenericAPIClient implemented in terms of an underlying http.Client.
@@ -50,7 +50,7 @@ type httpAPIClient struct {
 	headers http.Header
 }
 
-func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, error) {
+func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (APIResponse, *Error) {
 	u := *c.baseURL
 	u.Path = path.Join(c.baseURL.Path, endpoint)
 	var reqBody io.Reader
@@ -59,10 +59,22 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	} else if verb == http.MethodPost {
 		reqBody = strings.NewReader(query.Encode())
 	}
+	queryStr := query.Encode()
+	if unescapedQueryStr, err := url.QueryUnescape(queryStr); err == nil {
+		queryStr = unescapedQueryStr
+	} else {
+		klog.Errorf("Error %v unescaping query %s", err, queryStr)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, verb, u.String(), reqBody)
 	if err != nil {
-		return APIResponse{}, fmt.Errorf("error constructing HTTP request to Prometheus: %v", err)
+		return APIResponse{}, &Error{
+			Type:       ErrExec,
+			Msg:        fmt.Sprintf("error constructing HTTP request to Prometheus: %v", err),
+			Query:      queryStr,
+			StatusCode: 0, // No status code since no request was sent
+		}
+
 	}
 	for key, values := range c.headers {
 		for _, value := range values {
@@ -81,7 +93,12 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	}()
 
 	if err != nil {
-		return APIResponse{}, err
+		return APIResponse{}, &Error{
+			Type:       ErrExec,
+			Msg:        err.Error(),
+			StatusCode: resp.StatusCode,
+			Query:      queryStr,
+		}
 	}
 
 	if klog.V(6).Enabled() {
@@ -93,33 +110,41 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
 		return APIResponse{}, &Error{
-			Type: ErrBadResponse,
-			Msg:  fmt.Sprintf("unknown response code %d", code),
+			Type:       ErrBadResponse,
+			Msg:        "No JSON object in response with this error code.",
+			StatusCode: code,
+			Query:      queryStr,
 		}
 	}
 
 	var body io.Reader = resp.Body
-	if klog.V(8).Enabled() {
-		data, err := io.ReadAll(body)
-		if err != nil {
-			return APIResponse{}, fmt.Errorf("unable to log response body: %v", err)
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return APIResponse{}, &Error{
+			Type:       ErrBadResponse,
+			Msg:        fmt.Sprintf("unable to read response body %s with error %v", string(data), err),
+			StatusCode: code,
+			Query:      queryStr,
 		}
-		klog.Infof("Response Body: %s", string(data))
-		body = bytes.NewReader(data)
 	}
+	body = bytes.NewReader(data)
 
 	var res APIResponse
 	if err = json.NewDecoder(body).Decode(&res); err != nil {
 		return APIResponse{}, &Error{
-			Type: ErrBadResponse,
-			Msg:  err.Error(),
+			Type:       ErrBadResponse,
+			Msg:        err.Error(),
+			StatusCode: code,
+			Query:      queryStr,
 		}
 	}
 
 	if res.Status == ResponseError {
 		return res, &Error{
-			Type: res.ErrorType,
-			Msg:  res.Error,
+			Type:       res.ErrorType,
+			Msg:        res.Error,
+			StatusCode: code,
+			Query:      queryStr,
 		}
 	}
 
@@ -161,7 +186,7 @@ func NewClient(client *http.Client, baseURL *url.URL, headers http.Header, verb 
 	return NewClientForAPI(genericClient, verb)
 }
 
-func (h *queryClient) Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, error) {
+func (h *queryClient) Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, *Error) {
 	vals := url.Values{}
 	if interval.Start != 0 {
 		vals.Set("start", interval.Start.String())
@@ -179,12 +204,26 @@ func (h *queryClient) Series(ctx context.Context, interval model.Interval, selec
 		return nil, err
 	}
 
+	queryStr := vals.Encode()
+	if unescapedQueryStr, err := url.QueryUnescape(queryStr); err == nil {
+		queryStr = unescapedQueryStr
+	} else {
+		klog.Errorf("Error %v unescaping query %s", err, queryStr)
+	}
+
 	var seriesRes []Series
-	err = json.Unmarshal(res.Data, &seriesRes)
-	return seriesRes, err
+	if err := json.Unmarshal(res.Data, &seriesRes); err != nil {
+		return nil, &Error{
+			Type:       ErrBadData,
+			Msg:        fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from api.Do(), api call/response was successful
+			Query:      queryStr,
+		}
+	}
+	return seriesRes, nil
 }
 
-func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (QueryResult, error) {
+func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (QueryResult, *Error) {
 	vals := url.Values{}
 	vals.Set("query", string(query))
 	if t != 0 {
@@ -200,11 +239,19 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 	}
 
 	var queryRes QueryResult
-	err = json.Unmarshal(res.Data, &queryRes)
-	return queryRes, err
+	if err := json.Unmarshal(res.Data, &queryRes); err != nil {
+		return queryRes, &Error{
+			Type:       ErrBadData,
+			Msg:        fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
+			Query:      string(query),
+		}
+	}
+
+	return queryRes, nil
 }
 
-func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (QueryResult, error) {
+func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (QueryResult, *Error) {
 	vals := url.Values{}
 	vals.Set("query", string(query))
 
@@ -227,8 +274,15 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 	}
 
 	var queryRes QueryResult
-	err = json.Unmarshal(res.Data, &queryRes)
-	return queryRes, err
+	if err := json.Unmarshal(res.Data, &queryRes); err != nil {
+		return queryRes, &Error{
+			Type:       ErrBadData,
+			Msg:        fmt.Sprintf("failed to unmarshal JSON response: %v", err),
+			StatusCode: http.StatusOK, // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
+			Query:      string(query),
+		}
+	}
+	return queryRes, nil
 }
 
 // timeoutFromContext checks the context for a deadline and calculates a "timeout" duration from it,

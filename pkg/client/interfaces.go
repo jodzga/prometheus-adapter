@@ -47,11 +47,11 @@ type Range struct {
 // when present and applicable.
 type Client interface {
 	// Series lists the time series matching the given series selectors
-	Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, error)
+	Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, *Error)
 	// Query runs a non-range query at the given time.
-	Query(ctx context.Context, t model.Time, query Selector) (QueryResult, error)
+	Query(ctx context.Context, t model.Time, query Selector) (QueryResult, *Error)
 	// QueryRange runs a range query at the given time.
-	QueryRange(ctx context.Context, r Range, query Selector) (QueryResult, error)
+	QueryRange(ctx context.Context, r Range, query Selector) (QueryResult, *Error)
 }
 
 // QueryResult is the result of a query.

@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 
 	prom "sigs.k8s.io/prometheus-adapter/pkg/client"
+	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 )
 
@@ -51,13 +52,15 @@ func (p *externalPrometheusProvider) GetExternalMetric(ctx context.Context, name
 		return nil, provider.NewMetricNotFoundError(p.selectGroupResource(namespace), info.Metric)
 	}
 	// Here is where we're making the query, need to be before here xD
-	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), selector)
+	queryResults, queryErr := p.promClient.Query(ctx, pmodel.Now(), selector)
 
-	if err != nil {
-		klog.Errorf("unable to fetch metrics from prometheus: %v", err)
+	if queryErr != nil {
+		klog.Errorf("unable to fetch external metrics from prometheus: %v", queryErr)
+		mprom.ExternalMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", queryErr.StatusCode)).Inc()
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
+	mprom.ExternalMetricsSuccessCounter.WithLabelValues().Inc()
 	return p.metricConverter.Convert(info, queryResults)
 }
 

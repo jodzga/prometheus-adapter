@@ -51,6 +51,8 @@ import (
 	extprov "sigs.k8s.io/prometheus-adapter/pkg/external-provider"
 	"sigs.k8s.io/prometheus-adapter/pkg/naming"
 	resprov "sigs.k8s.io/prometheus-adapter/pkg/resourceprovider"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type PrometheusAdapter struct {
@@ -83,6 +85,8 @@ type PrometheusAdapter struct {
 	// DisableHTTP2 indicates that http2 should not be enabled.
 	DisableHTTP2  bool
 	metricsConfig *adaptercfg.MetricsDiscoveryConfig
+	// MetricsPort is the port on which metrics should be exposed for scraping by Prometheus
+	MetricsPort string
 }
 
 func (cmd *PrometheusAdapter) makePromClient() (prom.Client, error) {
@@ -157,7 +161,7 @@ func (cmd *PrometheusAdapter) addFlags() {
 		"period for which to query the set of available metrics from Prometheus")
 	cmd.Flags().BoolVar(&cmd.DisableHTTP2, "disable-http2", cmd.DisableHTTP2,
 		"Disable HTTP/2 support")
-
+	cmd.Flags().StringVar(&cmd.MetricsPort, "metrics-port", cmd.MetricsPort, "Port on which to expose metrics for scraping")
 	// Add logging flags
 	logs.AddFlags(cmd.Flags())
 }
@@ -295,6 +299,18 @@ func (cmd *PrometheusAdapter) addResourceMetricsAPI(promClient prom.Client, stop
 	return nil
 }
 
+func setupMetricsPort(port string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	go func() {
+		klog.Infof("[http] listening on %s", port)
+		err := http.ListenAndServe(port, mux)
+		if err != nil {
+			klog.Warningf("[http] error serving http: %+v", err)
+		}
+	}()
+}
+
 func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
@@ -342,6 +358,9 @@ func main() {
 
 	// stop channel closed on SIGTERM and SIGINT
 	stopCh := genericapiserver.SetupSignalHandler()
+
+	// Setup port to expose metrics on
+	setupMetricsPort(cmd.MetricsPort)
 
 	// construct the provider
 	cmProvider, err := cmd.makeProvider(promClient, stopCh)

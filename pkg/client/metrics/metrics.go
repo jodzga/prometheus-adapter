@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	apimetrics "k8s.io/apiserver/pkg/endpoints/metrics"
 	"k8s.io/component-base/metrics"
@@ -44,6 +45,70 @@ var (
 			Buckets:   prometheus.DefBuckets,
 		},
 		[]string{"path", "server"},
+	)
+
+	ExternalMetricsSuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "external_metrics_query_success_total",
+			Help: "Total number of successful external metrics query attempts",
+		},
+		[]string{},
+	)
+
+	ExternalMetricsFailureCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "external_metrics_query_failure_total",
+			Help: "Total number of failed external metrics query attempts",
+		},
+		[]string{"statusCode"},
+	)
+
+	PodQuerySuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "namespace_query_success_total",
+			Help: "Total number of successful namespace query attempts in GetPodMetrics",
+		},
+		[]string{"namespace"},
+	)
+
+	PodQueryFailureCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "namespace_query_failure_total",
+			Help: "Total number of failed namespace query attempts in GetPodMetrics",
+		},
+		[]string{"namespace", "statusCode"},
+	)
+
+	NodeQuerySuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "node_query_success_total",
+			Help: "Total number of successful node query attempts in GetNodeMetrics",
+		},
+		[]string{},
+	)
+
+	NodeQueryFailureCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "node_query_failure_total",
+			Help: "Total number of failed node query attempts in GetNodeMetrics",
+		},
+		[]string{"statusCode"},
+	)
+
+	CustomMetricsSuccessCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "custom_metrics_query_success_total",
+			Help: "Total number of successful custom metrics query attempts",
+		},
+		[]string{},
+	)
+
+	CustomMetricsFailureCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "custom_metrics_query_failure_total",
+			Help: "Total number of failed custom metrics query attempts",
+		},
+		[]string{"statusCode"},
 	)
 )
 
@@ -67,14 +132,14 @@ type instrumentedGenericClient struct {
 	client     client.GenericAPIClient
 }
 
-func (c *instrumentedGenericClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (client.APIResponse, error) {
+func (c *instrumentedGenericClient) Do(ctx context.Context, verb, endpoint string, query url.Values) (client.APIResponse, *client.Error) {
 	startTime := time.Now()
-	var err error
+	var err *client.Error
 	defer func() {
 		endTime := time.Now()
 		// skip calls where we don't make the actual request
 		if err != nil {
-			if _, wasAPIErr := err.(*client.Error); !wasAPIErr {
+			if err.Type != client.ErrExec {
 				// TODO: measure API errors by code?
 				return
 			}

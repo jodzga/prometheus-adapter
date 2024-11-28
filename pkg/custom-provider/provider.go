@@ -20,10 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"time"
 
 	pmodel "github.com/prometheus/common/model"
-
 	apierr "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -35,6 +35,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/klog/v2"
 	"k8s.io/metrics/pkg/apis/custom_metrics"
+	mprom "sigs.k8s.io/prometheus-adapter/pkg/client/metrics"
 
 	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider"
 	"sigs.k8s.io/custom-metrics-apiserver/pkg/provider/helpers"
@@ -147,16 +148,18 @@ func (p *prometheusProvider) buildQuery(ctx context.Context, info provider.Custo
 	// TODO: use an actual context
 	queryResults, err := p.promClient.Query(ctx, pmodel.Now(), query)
 	if err != nil {
-		klog.Errorf("unable to fetch metrics from prometheus: %v", err)
+		klog.Errorf("unable to fetch custom metrics from prometheus: %s", err.Error())
+		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", err.StatusCode)).Inc()
 		// don't leak implementation details to the user
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
 
 	if queryResults.Type != pmodel.ValVector {
 		klog.Errorf("unexpected results from prometheus: expected %s, got %s on results %v", pmodel.ValVector, queryResults.Type, queryResults)
+		mprom.CustomMetricsFailureCounter.WithLabelValues(fmt.Sprintf("%d", http.StatusOK)).Inc() // Use http.StatusOK instead of hardcoded 200. Since err was not returned from query(), api call/response was successful
 		return nil, apierr.NewInternalError(fmt.Errorf("unable to fetch metrics"))
 	}
-
+	mprom.CustomMetricsSuccessCounter.WithLabelValues().Inc()
 	return *queryResults.Vector, nil
 }
 
