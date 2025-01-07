@@ -189,10 +189,10 @@ func NewClient(client *http.Client, baseURL *url.URL, headers http.Header, verb 
 func (h *queryClient) Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, *Error) {
 	vals := url.Values{}
 	if interval.Start != 0 {
-		vals.Set("start", interval.Start.String())
+		vals.Set("start", fmt.Sprintf("%d", int64(interval.Start/1000)))
 	}
 	if interval.End != 0 {
-		vals.Set("end", interval.End.String())
+		vals.Set("end", fmt.Sprintf("%d", int64(interval.End/1000)))
 	}
 
 	for _, selector := range selectors {
@@ -227,10 +227,10 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 	vals := url.Values{}
 	vals.Set("query", string(query))
 	if t != 0 {
-		vals.Set("time", t.String())
+		vals.Set("time", fmt.Sprintf("%d", int64(t/1000)))
 	}
 	if timeout, hasTimeout := timeoutFromContext(ctx); hasTimeout {
-		vals.Set("timeout", model.Duration(timeout).String())
+		vals.Set("timeout", fmt.Sprintf("%ds", int64(model.Duration(timeout)/1000)))
 	}
 
 	res, err := h.api.Do(ctx, h.verb, queryURL, vals)
@@ -256,16 +256,16 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 	vals.Set("query", string(query))
 
 	if r.Start != 0 {
-		vals.Set("start", r.Start.String())
+		vals.Set("start", fmt.Sprintf("%d", int64(r.Start/1000)))
 	}
 	if r.End != 0 {
-		vals.Set("end", r.End.String())
+		vals.Set("end", fmt.Sprintf("%d", int64(r.End/1000)))
 	}
 	if r.Step != 0 {
-		vals.Set("step", model.Duration(r.Step).String())
+		vals.Set("step", fmt.Sprintf("%ds", int64(model.Duration(r.Step)/1000)))
 	}
 	if timeout, hasTimeout := timeoutFromContext(ctx); hasTimeout {
-		vals.Set("timeout", model.Duration(timeout).String())
+		vals.Set("timeout", fmt.Sprintf("%ds", int64(model.Duration(timeout)/1000)))
 	}
 
 	res, err := h.api.Do(ctx, h.verb, queryRangeURL, vals)
