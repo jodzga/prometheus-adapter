@@ -189,10 +189,10 @@ func NewClient(client *http.Client, baseURL *url.URL, headers http.Header, verb 
 func (h *queryClient) Series(ctx context.Context, interval model.Interval, selectors ...Selector) ([]Series, *Error) {
 	vals := url.Values{}
 	if interval.Start != 0 {
-		vals.Set("start", fmt.Sprintf("%d", int64(interval.Start/1000)))
+		vals.Set("start", getValueFromTime(interval.Start))
 	}
 	if interval.End != 0 {
-		vals.Set("end", fmt.Sprintf("%d", int64(interval.End/1000)))
+		vals.Set("end", getValueFromTime(interval.End))
 	}
 
 	for _, selector := range selectors {
@@ -227,10 +227,10 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 	vals := url.Values{}
 	vals.Set("query", string(query))
 	if t != 0 {
-		vals.Set("time", fmt.Sprintf("%d", int64(t/1000)))
+		vals.Set("time", getValueFromTime(t))
 	}
 	if timeout, hasTimeout := timeoutFromContext(ctx); hasTimeout {
-		vals.Set("timeout", fmt.Sprintf("%ds", int64(model.Duration(timeout)/1000)))
+		vals.Set("timeout", getValueFromDuration(timeout))
 	}
 
 	res, err := h.api.Do(ctx, h.verb, queryURL, vals)
@@ -256,16 +256,16 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 	vals.Set("query", string(query))
 
 	if r.Start != 0 {
-		vals.Set("start", fmt.Sprintf("%d", int64(r.Start/1000)))
+		vals.Set("start", getValueFromTime(r.Start))
 	}
 	if r.End != 0 {
-		vals.Set("end", fmt.Sprintf("%d", int64(r.End/1000)))
+		vals.Set("end", getValueFromTime(r.End))
 	}
 	if r.Step != 0 {
-		vals.Set("step", fmt.Sprintf("%ds", int64(model.Duration(r.Step)/1000)))
+		vals.Set("step", getValueFromDuration(r.Step))
 	}
 	if timeout, hasTimeout := timeoutFromContext(ctx); hasTimeout {
-		vals.Set("timeout", fmt.Sprintf("%ds", int64(model.Duration(timeout)/1000)))
+		vals.Set("timeout", getValueFromDuration(timeout))
 	}
 
 	res, err := h.api.Do(ctx, h.verb, queryRangeURL, vals)
@@ -293,4 +293,30 @@ func timeoutFromContext(ctx context.Context) (time.Duration, bool) {
 	}
 
 	return time.Duration(0), false
+}
+
+func getValueFromTime(t model.Time) (string) {
+	rawTime := int64(t)
+	// Normalize to seconds dynamically (round down if necessary)
+	// If `t` has millisecond granularity, convert to seconds
+	var normalizedTime int64
+	if rawTime > 1_000_000_000 { // Dynamic check for unit granularity
+		normalizedTime = rawTime / 1000
+	} else {
+		normalizedTime = rawTime
+	}
+
+	// Set the normalized time in the query parameters
+	return fmt.Sprintf("%d", normalizedTime)
+}
+
+func getValueFromDuration(t time.Duration) (string) {
+	timeoutMillis := int64(t)
+	var timeoutSeconds int64
+	if timeoutMillis > 10_000 { // Assume timeouts > 10 seconds are in milliseconds
+		timeoutSeconds = (timeoutMillis + 500) / 1000 // Convert and round
+	} else {
+		timeoutSeconds = timeoutMillis // Assume already in seconds
+	}
+	return fmt.Sprintf("%ds", timeoutSeconds)
 }
