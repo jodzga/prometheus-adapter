@@ -86,8 +86,16 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	}
 
 	resp, err := c.client.Do(req)
+	if resp == nil {
+		return APIResponse{}, &Error{
+			Type:       ErrExec,
+			Msg:        fmt.Sprintf("HTTP response is nil; error: %v", err),
+			StatusCode: 0, // No status code since no response
+			Query:      queryStr,
+		}
+	}
 	defer func() {
-		if resp != nil {
+		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
 	}()
