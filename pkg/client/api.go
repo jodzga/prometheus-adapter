@@ -86,13 +86,9 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	}
 
 	resp, err := c.client.Do(req)
-	if resp == nil {
-		return APIResponse{}, &Error{
-			Type:       ErrExec,
-			Msg:        fmt.Sprintf("HTTP response is nil; error: %v", err),
-			StatusCode: 0, // No status code since no response
-			Query:      queryStr,
-		}
+	code := 0
+	if resp != nil {
+		code = resp.StatusCode
 	}
 	defer func() {
 		if resp != nil && resp.Body != nil {
@@ -104,7 +100,15 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		return APIResponse{}, &Error{
 			Type:       ErrExec,
 			Msg:        err.Error(),
-			StatusCode: resp.StatusCode,
+			StatusCode: code,
+			Query:      queryStr,
+		}
+	}
+	if resp == nil {
+		return APIResponse{}, &Error{
+			Type:       ErrExec,
+			Msg:        fmt.Sprintf("HTTP response is nil; error: %v", err),
+			StatusCode: code,
 			Query:      queryStr,
 		}
 	}
@@ -112,8 +116,6 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if klog.V(6).Enabled() {
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
 	}
-
-	code := resp.StatusCode
 
 	// codes that aren't 2xx, 400, 422, or 503 won't return JSON objects
 	if code/100 != 2 && code != 400 && code != 422 && code != 503 {
