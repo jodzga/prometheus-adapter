@@ -107,7 +107,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 	if resp == nil {
 		return APIResponse{}, &Error{
 			Type:       ErrExec,
-			Msg:        fmt.Sprintf("HTTP response is nil; error: %v", err),
+			Msg:        "HTTP response is nil, but no error received",
 			StatusCode: code,
 			Query:      queryStr,
 		}
