@@ -91,7 +91,7 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 		code = resp.StatusCode
 	}
 	defer func() {
-		if resp != nil && resp.Body != nil {
+		if resp != nil {
 			resp.Body.Close()
 		}
 	}()
