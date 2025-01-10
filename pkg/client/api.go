@@ -104,14 +104,6 @@ func (c *httpAPIClient) Do(ctx context.Context, verb, endpoint string, query url
 			Query:      queryStr,
 		}
 	}
-	if resp == nil {
-		return APIResponse{}, &Error{
-			Type:       ErrExec,
-			Msg:        "HTTP response is nil, but no error received",
-			StatusCode: code,
-			Query:      queryStr,
-		}
-	}
 
 	if klog.V(6).Enabled() {
 		klog.Infof("%s %s %s", verb, u.String(), resp.Status)
