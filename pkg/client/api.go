@@ -232,7 +232,9 @@ func (h *queryClient) Query(ctx context.Context, t model.Time, query Selector) (
 		vals.Set("time", t.String())
 	}
 	if timeout, hasTimeout := timeoutFromContext(ctx); hasTimeout {
-		vals.Set("timeout", model.Duration(timeout).String())
+    if timeoutDuration := model.Duration(timeout).String(); timeoutDuration != "" {
+      vals.Set("timeout", timeoutDuration)
+    }
 	}
 
 	res, err := h.api.Do(ctx, h.verb, queryURL, vals)
@@ -267,7 +269,9 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 		vals.Set("step", model.Duration(r.Step).String())
 	}
 	if timeout, hasTimeout := timeoutFromContext(ctx); hasTimeout {
-		vals.Set("timeout", model.Duration(timeout).String())
+	  if timeoutDuration := model.Duration(timeout).String(); timeoutDuration != "" {
+	    vals.Set("timeout", timeoutDuration)
+	  }
 	}
 
 	res, err := h.api.Do(ctx, h.verb, queryRangeURL, vals)
@@ -291,7 +295,11 @@ func (h *queryClient) QueryRange(ctx context.Context, r Range, query Selector) (
 // when present
 func timeoutFromContext(ctx context.Context) (time.Duration, bool) {
 	if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
-		return time.Since(deadline), true
+	  timeout := time.Since(deadline)
+	  if timeout <= 0 {
+	    return time.Until(deadline), true
+	  }
+		return timeout, true
 	}
 
 	return time.Duration(0), false
